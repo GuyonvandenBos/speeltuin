@@ -65,7 +65,7 @@ button:focus-visible,select:focus-visible{outline:2px solid var(--accent);outlin
   <button id="bCam" aria-pressed="false">Webcam</button>
   <button id="bUndo" title="Undo (Ctrl+Z)">Undo</button>
   <button id="bClear">Clear</button>
-  <button id="bReset">Reset</button>
+  <button id="bReset" title="Load a set of example strings">Example</button>
 </div>
 
 <div class="hint" id="hint"></div>
@@ -151,7 +151,6 @@ function preset(){
     strings.push(mk(cx - half, y1, cx + half, y2));
   }
 }
-preset();
 
 function pluck(s, u, vel, now){
   if (now - s.last < 70) return;
@@ -240,7 +239,7 @@ cv.addEventListener('pointerdown', e => {
   if (e.button === 2) return;
   initAudio(); cv.setPointerCapture(e.pointerId);
   const pt = { x: e.clientX, y: e.clientY };
-  if (drawMode || e.shiftKey){ pending = { a: pt, b: { ...pt }, id: e.pointerId }; return; }
+  if (drawMode || e.shiftKey || !strings.length){ pending = { a: pt, b: { ...pt }, id: e.pointerId }; return; }
   ptrs.set(e.pointerId, { x: pt.x, y: pt.y });
   const target = e.pointerType !== 'mouse' ? nearestString(pt.x, pt.y, 30) : null;
   if (target) press = { id: e.pointerId, x: pt.x, y: pt.y, s: target, t: performance.now() };
@@ -272,7 +271,7 @@ addEventListener('keydown', e => {
 let video = null, landmarker = null, landmarkerP = null, lastVT = -1, camOn = false;
 let hands = []; // tracked hands: {id, pts (smoothed px), raw, filt, pinch, seen}
 let nextHandId = 1;
-const PLUCK_TIPS = [8, 12, 16, 20]; // thumb left out: it caused accidental plucks
+const PLUCK_TIPS = [8]; // only the index fingertip plucks: other fingers caused accidental plucks
 const BONES = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
 const PINCH_ON = .24, PINCH_OFF = .40;   // thumb–index distance / palm size, with hysteresis
 const CREATE_HOLD = 350, DELETE_HOLD = 650, CREATE_COOLDOWN = 900, GRAB_DIST = 34;
@@ -420,6 +419,13 @@ function frame(now){
     ctx.fillStyle = 'rgba(7,6,26,.25)'; ctx.fillRect(0, 0, W, H);
   }
 
+  if (!strings.length && !pending && intro.hidden){
+    ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(238,237,255,.55)';
+    ctx.font = `600 ${Math.max(16, Math.min(22, W * .022))}px Inter, system-ui, sans-serif`;
+    ctx.fillText(camOn ? 'Pinch with both hands, hold, and pull apart' : 'Drag anywhere to stretch your first string', W / 2, H / 2 - 6);
+    ctx.font = `400 ${Math.max(13, Math.min(15, W * .015))}px Inter, system-ui, sans-serif`; ctx.fillStyle = 'rgba(163,159,210,.8)';
+    ctx.fillText(camOn ? 'Let go to place the string, then pluck it with your index finger' : 'Longer strings play lower notes', W / 2, H / 2 + 20);
+  }
   ctx.globalCompositeOperation = 'lighter';
   const SEG = 48;
   for (const s of strings){
@@ -497,22 +503,21 @@ requestAnimationFrame(frame);
 const hint = document.getElementById('hint');
 function updateHint(){
   hint.innerHTML = camOn
-    ? '<b>Swipe your fingertips</b> to pluck. <b>Pinch a string and hold</b> to remove it. <b>Pinch with both hands, hold</b>, pull apart and let go to add one; bring them together to cancel.'
+    ? '<b>Swipe your index finger</b> to pluck. <b>Pinch a string and hold</b> to remove it. <b>Pinch with both hands, hold</b>, pull apart and let go to add one; bring them together to cancel.'
     : (drawMode
       ? '<b>Drag</b> to stretch a new string. Longer strings play lower notes.'
-      : '<b>Drag across</b> the strings to pluck them. Hold <b>Shift</b> or tap <b>Draw string</b> to add your own. <b>Right-click</b> or long-press a string to remove it. <b>Ctrl+Z</b> undoes.');
+      : '<b>Drag across</b> a string to pluck it. Hold <b>Shift</b> or tap <b>Draw string</b> to add your own. <b>Right-click</b> or long-press a string to remove it. <b>Ctrl+Z</b> undoes.');
 }
 updateHint();
 bDraw.onclick = () => { drawMode = !drawMode; bDraw.setAttribute('aria-pressed', String(drawMode)); updateHint(); };
 document.getElementById('bScale').onchange = e => { scaleName = e.target.value; cache.clear(); };
-document.getElementById('bClear').onclick = () => { strings.slice().forEach(removeString); if (!drawMode && !camOn) bDraw.click(); };
+document.getElementById('bClear').onclick = () => { strings.slice().forEach(removeString); };
 document.getElementById('bUndo').onclick = undo;
-document.getElementById('bReset').onclick = () => preset();
+document.getElementById('bReset').onclick = () => { preset(); strings.forEach((s, i) => setTimeout(() => pluck(s, .5, .4, performance.now()), i * 90)); };
 document.getElementById('bCam').onclick = () => { initAudio(); camOn ? stopCam() : startCam(); };
 const intro = document.getElementById('intro');
 document.getElementById('goMouse').onclick = () => {
   initAudio(); intro.hidden = true;
-  const now = performance.now(); strings.forEach((s, i) => setTimeout(() => pluck(s, .5, .4, performance.now()), i * 90));
 };
 document.getElementById('goCam').onclick = () => { initAudio(); intro.hidden = true; startCam(); };
 </script>

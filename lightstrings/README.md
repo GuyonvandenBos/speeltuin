@@ -1,6 +1,6 @@
 # Lightstrings
 
-An air harp made of light. Glowing strings hang across the screen; swipe through them to pluck. Longer strings play lower notes, and you can stretch new strings anywhere.
+An air harp made of light. You start with an empty board, stretch glowing strings wherever you like, and swipe through them to pluck. Longer strings play lower notes.
 
 ## Play
 
@@ -23,7 +23,7 @@ Hand tracking runs fully in the browser with [MediaPipe Hand Landmarker](https:/
 
 | Gesture | Action |
 | --- | --- |
-| Swipe fingertips through a string | Pluck it (faster = louder) |
+| Swipe your index finger through a string | Pluck it (faster = louder) |
 | Pinch a string with one hand and hold | Remove it |
 | Pinch with both hands, hold, pull apart, let go | Add a string between your hands |
 | Bring both pinches back together, let go | Cancel the new string |
@@ -32,14 +32,15 @@ Hand tracking runs fully in the browser with [MediaPipe Hand Landmarker](https:/
 
 | Input | Action |
 | --- | --- |
-| Drag / swipe | Pluck strings (faster = louder) |
+| Drag on an empty board | Stretch your first string |
+| Drag / swipe across a string | Pluck it (faster = louder) |
 | Shift + drag, or **Draw string** | Stretch a new string |
 | Right-click, or long-press on touch | Remove a string |
 | **Undo** or Ctrl+Z | Undo the last add or remove |
 | Esc | Cancel the string you're drawing |
 | Keys 1–9 | Pluck string 1–9 |
 | Scale menu | Pentatonic, major, blues, dorian |
-| **Clear** / **Reset** | Remove all strings / restore the default set |
+| **Clear** / **Example** | Remove all strings / load a set of example strings |
 
 ## How it works
 
