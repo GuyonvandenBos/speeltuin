@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Lightstrings</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Inter:wght@400;500;600&display=swap">
+<style>
+/* Layout: a full-bleed instrument canvas; controls float in a thin bar on top, hints at the bottom. Single dark look by choice (it's an instrument made of light). */
+:root{
+  --bg:#07061a; --bg2:#151038; --fg:#eeedff; --dim:#a39fd2; --line:#332c70; --accent:#ffcf5c; --accent-ink:#1c1400;
+  --font-d:"Unbounded",system-ui,sans-serif; --font-b:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
+  color-scheme:dark;
+}
+html,body{height:100%}
+[hidden]{display:none!important}
+.intro,.bar,.hint{user-select:none;-webkit-user-select:none}
+body{background:var(--bg);color:var(--fg);font-family:var(--font-b);overflow:hidden}
+#cv{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:crosshair}
+.bar{position:fixed;top:0;left:0;right:0;z-index:5;display:flex;flex-wrap:wrap;gap:8px;align-items:center;
+  padding-top:calc(env(safe-area-inset-top,0px) + 12px);padding-bottom:20px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  background:linear-gradient(var(--bg) 35%,transparent);pointer-events:none}
+.bar>*{pointer-events:auto}
+.brand{font:700 16px/1 var(--font-d);letter-spacing:.02em;margin-right:auto;pointer-events:none}
+.brand span{color:var(--accent)}
+button,select{font:500 13px/1 var(--font-b);color:var(--fg);background:rgba(255,255,255,.06);border:1px solid var(--line);
+  border-radius:999px;padding:8px 14px;cursor:pointer}
+select{padding-right:10px}
+button:hover,select:hover{background:rgba(255,255,255,.12)}
+button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+button:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.hint{position:fixed;left:0;right:0;bottom:0;z-index:5;text-align:center;color:var(--dim);font-size:13px;line-height:1.5;
+  padding-bottom:calc(env(safe-area-inset-bottom,0px) + 14px);padding-top:24px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  background:linear-gradient(transparent,var(--bg) 70%);pointer-events:none;text-wrap:balance}
+.hint b{color:var(--fg);font-weight:600}
+#msg{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:6;max-width:min(420px,calc(100% - 32px));
+  background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:16px 18px;font-size:14px;line-height:1.5;text-align:center}
+.intro{position:fixed;inset:0;z-index:10;display:grid;place-items:center;background:rgba(7,6,26,.72);backdrop-filter:blur(3px);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.card{max-width:460px;text-align:center;display:grid;gap:14px}
+.card h2{font:700 clamp(30px,8vw,48px)/1.05 var(--font-d);margin:0;text-wrap:balance}
+.card h2 span{color:var(--accent)}
+.card p{margin:0;color:var(--dim);font-size:15px;line-height:1.55}
+.card .go{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:6px}
+.card .go button{font-size:15px;padding:12px 20px}
+.card .go .primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+.card small{color:var(--dim);font-size:12px}
+@media (max-width:520px){.brand{width:100%;margin-bottom:2px}}
+</style>
+
+<canvas id="cv" aria-label="Instrument: glowing strings you can pluck"></canvas>
+
+<div class="bar">
+  <div class="brand">Light<span>strings</span></div>
+  <button id="bDraw" aria-pressed="false" title="Drag to stretch a new string (or hold Shift)">Draw string</button>
+  <select id="bScale" aria-label="Scale">
+    <option value="penta">Pentatonic</option>
+    <option value="major">Major</option>
+    <option value="blues">Blues</option>
+    <option value="dorian">Dorian</option>
+  </select>
+  <button id="bCam" aria-pressed="false">Webcam</button>
+  <button id="bClear">Clear</button>
+  <button id="bReset">Reset</button>
+</div>
+
+<div class="hint" id="hint"></div>
+<div id="msg" hidden></div>
+
+<div class="intro" id="intro">
+  <div class="card">
+    <h2>Light<span>strings</span></h2>
+    <p>Strings of light hang in the air. Swipe across them to pluck. Longer strings play lower notes, and you can stretch new ones anywhere.</p>
+    <div class="go">
+      <button class="primary" id="goMouse">Play with mouse / touch</button>
+      <button id="goCam">Play with webcam</button>
+    </div>
+    <small>Webcam mode tracks your hands in the browser. Video never leaves your computer.</small>
+  </div>
+</div>
+
+<script type="module">
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+let W = 0, H = 0, DPR = 1;
+function resize(){ DPR = Math.min(devicePixelRatio || 1, 2); W = innerWidth; H = innerHeight;
+  cv.width = W * DPR; cv.height = H * DPR; ctx.setTransform(DPR, 0, 0, DPR, 0, 0); }
+addEventListener('resize', resize); resize();
+
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ---------- music ---------- */
+const SCALES = { penta:[0,3,5,7,10], major:[0,2,4,5,7,9,11], blues:[0,3,5,6,7,10], dorian:[0,2,3,5,7,9,10] };
+let scaleName = 'penta';
+const ROOT = 110; // A2
+function noteFor(s){
+  const len = Math.hypot((s.bx - s.ax) * W, (s.by - s.ay) * H);
+  const r = Math.max(0, Math.min(1, (len / Math.hypot(W, H) - 0.08) / 0.82));
+  const sc = SCALES[scaleName], steps = sc.length * 3;
+  const k = Math.round((1 - r) * (steps - 1));
+  const semis = sc[k % sc.length] + 12 * Math.floor(k / sc.length);
+  return { f: ROOT * Math.pow(2, semis / 12), k, steps };
+}
+
+/* ---------- audio: Karplus–Strong plucked strings ---------- */
+let ac = null, master = null; const cache = new Map();
+function initAudio(){
+  if (ac) { ac.resume(); return; }
+  ac = new (window.AudioContext || window.webkitAudioContext)();
+  const comp = ac.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 4;
+  master = ac.createGain(); master.gain.value = 0.7;
+  const rev = ac.createConvolver(), wet = ac.createGain(); wet.gain.value = 0.32;
+  const sr = ac.sampleRate, len = Math.floor(sr * 2.4), ib = ac.createBuffer(2, len, sr);
+  for (let c = 0; c < 2; c++){ const d = ib.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random()*2-1) * Math.pow(1 - i/len, 3.2); }
+  rev.buffer = ib;
+  master.connect(comp); master.connect(rev); rev.connect(wet); wet.connect(comp); comp.connect(ac.destination);
+}
+function pluckBuffer(f){
+  const key = Math.round(f * 10); if (cache.has(key)) return cache.get(key);
+  const sr = ac.sampleRate, len = Math.floor(sr * 3.2), b = ac.createBuffer(1, len, sr), d = b.getChannelData(0);
+  const n = Math.max(2, Math.floor(sr / f));
+  let prev = 0;
+  for (let i = 0; i < n; i++){ const x = Math.random()*2-1; prev = prev*0.45 + x*0.55; d[i] = prev; }
+  const damp = 0.4985 + Math.min(0.0012, 40 / f * 0.0012);
+  for (let i = n; i < len; i++) d[i] = damp * (d[i-n] + d[i-n-1 < 0 ? 0 : i-n-1]);
+  const out = { b, rate: f * (n + 0.5) / sr };
+  cache.set(key, out); return out;
+}
+function playNote(f, vel, pan){
+  if (!ac) return;
+  const { b, rate } = pluckBuffer(f);
+  const src = ac.createBufferSource(); src.buffer = b; src.playbackRate.value = rate;
+  const g = ac.createGain(); g.gain.value = 0.25 + vel * 0.55;
+  const p = ac.createStereoPanner ? ac.createStereoPanner() : null;
+  src.connect(g); if (p){ p.pan.value = pan; g.connect(p); p.connect(master); } else g.connect(master);
+  src.start(); src.stop(ac.currentTime + 3.2);
+}
+
+/* ---------- strings ---------- */
+let strings = [];
+const mk = (ax, ay, bx, by) => ({ ax, ay, bx, by, amp: 0, pos: .5, t0: 0, last: 0 });
+function preset(){
+  strings = []; const n = 9;
+  for (let i = 0; i < n; i++){
+    // harp-like: each string shorter than the last, so the set spans the scale
+    const half = (.88 - i * .066) / 2, cx = .5 + (i % 2 ? .05 : -.05) * (i / n);
+    const y1 = .22 + i * .072, y2 = .22 + ((i * 4) % n) * .072;
+    strings.push(mk(cx - half, y1, cx + half, y2));
+  }
+}
+preset();
+
+function pluck(s, u, vel, now){
+  if (now - s.last < 70) return;
+  s.last = now; s.t0 = now; s.pos = Math.min(.92, Math.max(.08, u));
+  s.amp = Math.min(1, Math.max(s.amp * Math.exp(-(now - s.t0) / 900), .35 + vel * .65));
+  const { f, k, steps } = noteFor(s);
+  const x = (s.ax + (s.bx - s.ax) * u), y = (s.ay + (s.by - s.ay) * u);
+  playNote(f, vel, Math.max(-1, Math.min(1, x * 2 - 1)) * .8);
+  const hue = hueFor(k, steps);
+  const count = reduceMotion ? 4 : 10 + Math.round(vel * 14);
+  for (let i = 0; i < count; i++){
+    const a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 4 * (.5 + vel);
+    sparks.push({ x: x * W, y: y * H, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 1, life: 1, hue });
+  }
+}
+const hueFor = (k, steps) => 330 - (k / Math.max(1, steps - 1)) * 250; // low = magenta, high = cyan/green
+
+function crossing(p, q, s){
+  const ax = s.ax * W, ay = s.ay * H, bx = s.bx * W, by = s.by * H;
+  const d = (q.x - p.x) * (by - ay) - (q.y - p.y) * (bx - ax);
+  if (!d) return null;
+  const t = ((ax - p.x) * (by - ay) - (ay - p.y) * (bx - ax)) / d;
+  const u = ((ax - p.x) * (q.y - p.y) - (ay - p.y) * (q.x - p.x)) / d;
+  return (t >= 0 && t <= 1 && u >= 0 && u <= 1) ? u : null;
+}
+function sweep(p, q, now){
+  const dist = Math.hypot(q.x - p.x, q.y - p.y);
+  if (dist < 0.5 || dist > Math.max(W, H) * .45) return;
+  const vel = Math.max(.15, Math.min(1, dist / 45));
+  for (const s of strings){ const u = crossing(p, q, s); if (u !== null) pluck(s, u, vel, now); }
+}
+
+/* ---------- sparks ---------- */
+let sparks = [];
+
+/* ---------- pointer input ---------- */
+const bDraw = document.getElementById('bDraw');
+let drawMode = false, pending = null;
+const ptrs = new Map();
+cv.addEventListener('pointerdown', e => {
+  initAudio(); cv.setPointerCapture(e.pointerId);
+  const pt = { x: e.clientX, y: e.clientY };
+  if (drawMode || e.shiftKey){ pending = { a: pt, b: { ...pt }, id: e.pointerId }; return; }
+  ptrs.set(e.pointerId, { x: pt.x, y: pt.y });
+});
+cv.addEventListener('pointermove', e => {
+  const pt = { x: e.clientX, y: e.clientY };
+  if (pending && pending.id === e.pointerId){ pending.b = pt; return; }
+  const prev = ptrs.get(e.pointerId);
+  if (prev){ sweep(prev, pt, performance.now()); prev.x = pt.x; prev.y = pt.y; trail.push({ x: pt.x, y: pt.y, life: 1 }); }
+});
+function endPtr(e){
+  if (pending && pending.id === e.pointerId){ commitPending(); }
+  ptrs.delete(e.pointerId);
+}
+cv.addEventListener('pointerup', endPtr); cv.addEventListener('pointercancel', endPtr);
+function commitPending(){
+  const { a, b } = pending; pending = null;
+  if (Math.hypot(b.x - a.x, b.y - a.y) > 60){
+    const s = mk(a.x / W, a.y / H, b.x / W, b.y / H); strings.push(s);
+    if (strings.length > 24) strings.shift();
+    pluck(s, .5, .6, performance.now());
+  }
+}
+let trail = [];
+
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'SELECT') return;
+  const n = parseInt(e.key, 10);
+  if (n >= 1 && n <= 9 && strings[n - 1]){ initAudio(); pluck(strings[n - 1], .5, .7, performance.now()); }
+});
+
+/* ---------- hand tracking (webcam) ---------- */
+let video = null, landmarker = null, lastVT = -1, hands = [], camOn = false;
+const tipPrev = new Map();
+const TIPS = [4, 8, 12, 16, 20];
+const BONES = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+let pinchWas = false;
+const msg = document.getElementById('msg');
+function say(t, ms){ msg.textContent = t; msg.hidden = !t; clearTimeout(say.t); if (ms) say.t = setTimeout(() => msg.hidden = true, ms); }
+
+async function startCam(){
+  const bCam = document.getElementById('bCam');
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error('no camera api');
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720, facingMode: 'user' }, audio: false });
+    video = document.createElement('video'); video.playsInline = true; video.muted = true; video.srcObject = stream; await video.play();
+  } catch (err) {
+    say('The camera is blocked here. Download Lightstrings and open the file in Chrome to play with your hands. Mouse and touch work right now.', 7000);
+    bCam.setAttribute('aria-pressed', 'false'); return;
+  }
+  camOn = true; bCam.setAttribute('aria-pressed', 'true'); updateHint();
+  if (!landmarker){
+    say('Loading hand tracking…');
+    try {
+      const V = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+      const { FilesetResolver, HandLandmarker } = await import(V + '/vision_bundle.mjs');
+      const fs = await FilesetResolver.forVisionTasks(V + '/wasm');
+      const opts = d => ({ baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task', delegate: d }, runningMode: 'VIDEO', numHands: 2 });
+      try { landmarker = await HandLandmarker.createFromOptions(fs, opts('GPU')); }
+      catch { landmarker = await HandLandmarker.createFromOptions(fs, opts('CPU')); }
+      say('Hands ready. Swipe your fingers through the strings.', 3000);
+    } catch (err) {
+      say('Hand tracking could not load. Check your internet connection and reload.', 6000); console.error(err);
+    }
+  }
+}
+function stopCam(){
+  camOn = false; hands = []; tipPrev.clear();
+  if (video?.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
+  video = null; document.getElementById('bCam').setAttribute('aria-pressed', 'false'); updateHint();
+}
+function videoRect(){
+  const vw = video.videoWidth || 1280, vh = video.videoHeight || 720;
+  const sc = Math.max(W / vw, H / vh), dw = vw * sc, dh = vh * sc;
+  return { ox: (W - dw) / 2, oy: (H - dh) / 2, dw, dh };
+}
+function trackHands(now){
+  if (!camOn || !landmarker || !video || video.readyState < 2) return;
+  if (video.currentTime === lastVT) return;
+  lastVT = video.currentTime;
+  const res = landmarker.detectForVideo(video, now);
+  const { ox, oy, dw, dh } = videoRect();
+  hands = (res.landmarks || []).map((lm, i) => ({
+    side: res.handednesses?.[i]?.[0]?.categoryName || res.handedness?.[i]?.[0]?.categoryName || ('h' + i),
+    pts: lm.map(p => ({ x: ox + (1 - p.x) * dw, y: oy + p.y * dh }))
+  }));
+  const seen = new Set(), pinches = [];
+  for (const h of hands){
+    const P = h.pts, size = Math.hypot(P[0].x - P[9].x, P[0].y - P[9].y) || 1;
+    h.pinch = Math.hypot(P[4].x - P[8].x, P[4].y - P[8].y) / size < .32;
+    if (h.pinch) pinches.push({ x: (P[4].x + P[8].x) / 2, y: (P[4].y + P[8].y) / 2 });
+    for (const t of TIPS){
+      const id = h.side + t; seen.add(id);
+      const cur = { x: P[t].x, y: P[t].y }, prev = tipPrev.get(id);
+      if (prev && !h.pinch) sweep(prev, cur, now);
+      tipPrev.set(id, cur);
+    }
+  }
+  for (const id of [...tipPrev.keys()]) if (!seen.has(id)) tipPrev.delete(id);
+  // two pinching hands stretch a new string between them
+  if (pinches.length === 2){ pending = { a: pinches[0], b: pinches[1], id: 'hands' }; pinchWas = true; }
+  else if (pinchWas){ pinchWas = false; if (pending?.id === 'hands') commitPending(); }
+}
+
+/* ---------- render ---------- */
+function frame(now){
+  trackHands(now);
+  const g = ctx.createRadialGradient(W/2, H*.55, 0, W/2, H*.55, Math.max(W, H) * .75);
+  g.addColorStop(0, '#151038'); g.addColorStop(1, '#07061a');
+  ctx.globalCompositeOperation = 'source-over'; ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+  if (camOn && video && video.readyState >= 2){
+    const { ox, oy, dw, dh } = videoRect();
+    ctx.save(); ctx.globalAlpha = .38; ctx.translate(W, 0); ctx.scale(-1, 1);
+    ctx.drawImage(video, ox, oy, dw, dh); ctx.restore();
+    ctx.fillStyle = 'rgba(7,6,26,.25)'; ctx.fillRect(0, 0, W, H);
+  }
+
+  ctx.globalCompositeOperation = 'lighter';
+  const SEG = 48;
+  for (const s of strings){
+    const { k, steps } = noteFor(s), hue = hueFor(k, steps);
+    const el = now - s.t0, A = s.amp * Math.exp(-el / 900);
+    if (A < .002) s.amp = 0;
+    const ax = s.ax * W, ay = s.ay * H, bx = s.bx * W, by = s.by * H;
+    const len = Math.hypot(bx - ax, by - ay) || 1, nx = -(by - ay) / len, ny = (bx - ax) / len;
+    const maxD = Math.min(26, len * .05) * (reduceMotion ? .4 : 1);
+    const ph = el / 1000 * Math.PI * 2 * (7 + (k % 7));
+    ctx.beginPath();
+    for (let i = 0; i <= SEG; i++){
+      const u = i / SEG, shape = u < s.pos ? u / s.pos : (1 - u) / (1 - s.pos);
+      const off = A * maxD * (shape * Math.cos(ph) + .25 * Math.sin(Math.PI * 2 * u) * Math.cos(ph * 2.01));
+      const x = ax + (bx - ax) * u + nx * off, y = ay + (by - ay) * u + ny * off;
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.strokeStyle = `hsla(${hue},100%,62%,${.10 + A * .35})`; ctx.lineWidth = 9 + A * 10; ctx.lineCap = 'round'; ctx.stroke();
+    ctx.strokeStyle = `hsla(${hue},100%,${70 + A * 20}%,${.75 + A * .25})`; ctx.lineWidth = 1.6 + A * 1.6; ctx.stroke();
+    for (const [px, py] of [[ax, ay], [bx, by]]){
+      ctx.beginPath(); ctx.arc(px, py, 3.2, 0, Math.PI * 2); ctx.fillStyle = `hsla(${hue},100%,80%,.9)`; ctx.fill();
+    }
+  }
+
+  for (const p of sparks){
+    p.x += p.vx; p.y += p.vy; p.vy += .06; p.vx *= .985; p.life -= .022;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 1.8 * p.life + .4, 0, Math.PI * 2);
+    ctx.fillStyle = `hsla(${p.hue},100%,75%,${Math.max(0, p.life)})`; ctx.fill();
+  }
+  sparks = sparks.filter(p => p.life > 0);
+
+  ctx.lineCap = 'round';
+  for (let i = 1; i < trail.length; i++){
+    const a = trail[i - 1], b = trail[i];
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+    ctx.strokeStyle = `rgba(255,207,92,${b.life * .5})`; ctx.lineWidth = 3 * b.life; ctx.stroke();
+  }
+  trail.forEach(t => t.life -= .07); trail = trail.filter(t => t.life > 0).slice(-40);
+
+  ctx.globalCompositeOperation = 'source-over';
+  if (pending){
+    ctx.setLineDash([8, 8]); ctx.beginPath(); ctx.moveTo(pending.a.x, pending.a.y); ctx.lineTo(pending.b.x, pending.b.y);
+    ctx.strokeStyle = 'rgba(255,207,92,.85)'; ctx.lineWidth = 2; ctx.stroke(); ctx.setLineDash([]);
+  }
+
+  for (const h of hands){
+    const P = h.pts;
+    ctx.strokeStyle = 'rgba(120,255,170,.75)'; ctx.lineWidth = 2;
+    ctx.beginPath(); for (const [a, b] of BONES){ ctx.moveTo(P[a].x, P[a].y); ctx.lineTo(P[b].x, P[b].y); } ctx.stroke();
+    for (let i = 0; i < P.length; i++){
+      const tip = TIPS.includes(i);
+      ctx.beginPath(); ctx.arc(P[i].x, P[i].y, tip ? 5 : 3, 0, Math.PI * 2);
+      ctx.fillStyle = tip ? (h.pinch ? '#ffcf5c' : '#ffffff') : 'rgba(255,90,110,.9)'; ctx.fill();
+    }
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+/* ---------- UI ---------- */
+const hint = document.getElementById('hint');
+function updateHint(){
+  hint.innerHTML = camOn
+    ? '<b>Swipe your fingertips</b> through the strings to pluck. <b>Pinch with both hands</b> and pull apart to stretch a new string.'
+    : (drawMode
+      ? '<b>Drag</b> to stretch a new string. Longer strings play lower notes.'
+      : '<b>Drag across</b> the strings to pluck them. Hold <b>Shift</b> or tap <b>Draw string</b> to add your own. Keys <b>1–9</b> pluck too.');
+}
+updateHint();
+bDraw.onclick = () => { drawMode = !drawMode; bDraw.setAttribute('aria-pressed', String(drawMode)); updateHint(); };
+document.getElementById('bScale').onchange = e => { scaleName = e.target.value; cache.clear(); };
+document.getElementById('bClear').onclick = () => { strings = []; if (!drawMode) bDraw.click(); };
+document.getElementById('bReset').onclick = () => preset();
+document.getElementById('bCam').onclick = () => { initAudio(); camOn ? stopCam() : startCam(); };
+const intro = document.getElementById('intro');
+document.getElementById('goMouse').onclick = () => {
+  initAudio(); intro.hidden = true;
+  const now = performance.now(); strings.forEach((s, i) => setTimeout(() => pluck(s, .5, .4, performance.now()), i * 90));
+};
+document.getElementById('goCam').onclick = () => { initAudio(); intro.hidden = true; startCam(); };
+</script>
+
+</html>
