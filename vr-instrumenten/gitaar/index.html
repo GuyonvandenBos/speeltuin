@@ -1,0 +1,499 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Gitaar VR</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Inter:wght@400;500;600&display=swap">
+<style>
+/* Layout: full-bleed 3D view; chord buttons in a bar at the bottom for the browser preview; a start card until play begins. Single dark look by choice. */
+:root{
+  --bg:#07061a; --bg2:#151038; --fg:#eeedff; --dim:#a39fd2; --line:#332c70; --accent:#ffcf5c; --accent-ink:#1c1400;
+  --font-d:"Unbounded",system-ui,sans-serif; --font-b:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
+  color-scheme:dark;
+}
+html,body{height:100%;margin:0}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--fg);font-family:var(--font-b);overflow:hidden}
+canvas{display:block;touch-action:none}
+.bar{position:fixed;top:0;left:0;right:0;z-index:5;display:flex;flex-wrap:wrap;gap:8px;align-items:center;
+  padding-top:calc(env(safe-area-inset-top,0px) + 12px);padding-bottom:20px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  background:linear-gradient(var(--bg) 35%,transparent);pointer-events:none;user-select:none}
+.bar>*{pointer-events:auto}
+.brand{font:700 16px/1 var(--font-d);margin-right:auto;pointer-events:none}
+.brand span{color:var(--accent)}
+button{font:500 13px/1 var(--font-b);color:var(--fg);background:rgba(255,255,255,.06);border:1px solid var(--line);border-radius:999px;padding:8px 14px;cursor:pointer}
+button:hover{background:rgba(255,255,255,.12)}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.chords{position:fixed;left:0;right:0;bottom:0;z-index:5;display:grid;gap:10px;justify-items:center;
+  padding-bottom:calc(env(safe-area-inset-bottom,0px) + 14px);padding-top:28px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  background:linear-gradient(transparent,var(--bg) 55%);user-select:none}
+.chords .row{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
+.chords button{min-width:48px;font-weight:600;font-variant-numeric:tabular-nums}
+.chords button kbd{font:500 10px var(--font-b);color:var(--dim);margin-left:6px}
+.chords button[aria-pressed="true"] kbd{color:var(--accent-ink)}
+.chords p{margin:0;color:var(--dim);font-size:13px;text-align:center;text-wrap:balance}
+.chords p b{color:var(--fg)}
+.intro{position:fixed;inset:0;z-index:10;display:grid;place-items:center;background:rgba(7,6,26,.8);backdrop-filter:blur(3px);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.card{max-width:500px;text-align:center;display:grid;gap:14px}
+.card h1{font:700 clamp(28px,7vw,44px)/1.05 var(--font-d);margin:0}
+.card h1 span{color:var(--accent)}
+.card p{margin:0;color:var(--dim);font-size:15px;line-height:1.55}
+.card .go{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:4px}
+.card .go button{font-size:15px;padding:12px 20px}
+.card label{color:var(--dim);font-size:14px;display:inline-flex;gap:8px;align-items:center;justify-content:center;cursor:pointer}
+.card small{color:var(--dim);font-size:12px;line-height:1.5}
+.card code{color:var(--fg);font-size:12px;word-break:break-all}
+#msg{position:fixed;left:50%;top:40%;transform:translate(-50%,-50%);z-index:11;max-width:min(420px,calc(100% - 32px));
+  background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:16px 18px;font-size:14px;line-height:1.5;text-align:center}
+@media (max-width:520px){.brand{width:100%}}
+</style>
+
+<div class="bar">
+  <div class="brand">Gitaar <span>VR</span></div>
+  <button id="bVR" hidden>Enter VR</button>
+</div>
+<div class="chords" id="chordBar">
+  <div class="row" id="chordRow"></div>
+  <p><b>Drag down or up across the strings</b> to strum. Pick a chord with the buttons or keys <b>1–8</b>; <b>0</b> plays open strings.</p>
+</div>
+<div id="msg" hidden></div>
+
+<div class="intro" id="intro">
+  <div class="card">
+    <h1>Gitaar <span>VR</span></h1>
+    <p>A glowing guitar floats in front of you. Rest your fretting hand on a chord on the neck and strum the strings with your other hand.</p>
+    <label><input type="checkbox" id="optLefty"> I play left-handed</label>
+    <div class="go">
+      <button class="primary" id="goVR" hidden>Enter VR</button>
+      <button id="goDesk">Try it in the browser</button>
+    </div>
+    <small id="noVR" hidden>No VR headset found. To play in VR, open this page in the Meta Quest browser:<br><code id="url"></code></small>
+  </div>
+</div>
+
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }</script>
+<script type="module">
+import * as THREE from 'three';
+
+/* ---------- renderer, scene, camera ---------- */
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local-floor');
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x07061a);
+scene.fog = new THREE.FogExp2(0x07061a, .12);
+const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, .01, 60);
+camera.position.set(0, 1.3, .55);
+camera.lookAt(0, 1.08, -.45);
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); fitDesktop(); });
+{
+  const dots = [], stars = [];
+  for (let x = -6; x <= 6; x += .4) for (let z = -6; z <= 6; z += .4) if (x * x + z * z < 36) dots.push(x, 0, z);
+  for (let i = 0; i < 900; i++){ const v = new THREE.Vector3().randomDirection().multiplyScalar(18 + Math.random() * 12); stars.push(v.x, Math.abs(v.y) + 1, v.z); }
+  const mk = (arr, size, color, op) => { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3));
+    return new THREE.Points(g, new THREE.PointsMaterial({ size, color, transparent: true, opacity: op, depthWrite: false })); };
+  scene.add(mk(dots, .02, 0x6a5fd0, .55), mk(stars, .09, 0xc9c4ff, .8));
+}
+
+/* ---------- music: standard tuning and chord shapes ---------- */
+const OPEN = [82.41, 110.0, 146.83, 196.0, 246.94, 329.63]; // E2 A2 D3 G3 B3 E4, low to high
+const CHORDS = [ // frets per string, low E to high e; -1 = not played
+  { name: 'G',  frets: [3, 2, 0, 0, 0, 3] },
+  { name: 'C',  frets: [-1, 3, 2, 0, 1, 0] },
+  { name: 'D',  frets: [-1, -1, 0, 2, 3, 2] },
+  { name: 'Em', frets: [0, 2, 2, 0, 0, 0] },
+  { name: 'Am', frets: [-1, 0, 2, 2, 1, 0] },
+  { name: 'F',  frets: [1, 3, 3, 2, 1, 1] },
+  { name: 'Dm', frets: [-1, -1, 0, 2, 3, 1] },
+  { name: 'E',  frets: [0, 2, 2, 1, 0, 0] },
+];
+let chord = -1; // -1 = open strings
+const stringFret = i => chord < 0 ? 0 : CHORDS[chord].frets[i];
+
+/* ---------- audio: plucked steel strings with a little body ---------- */
+let ac = null, out = null; const cache = new Map();
+function initAudio(){
+  if (ac){ ac.resume(); return; }
+  ac = new (window.AudioContext || window.webkitAudioContext)();
+  const comp = ac.createDynamicsCompressor(); comp.threshold.value = -16; comp.ratio.value = 4;
+  const body = ac.createBiquadFilter(); body.type = 'peaking'; body.frequency.value = 180; body.Q.value = 1.1; body.gain.value = 5;
+  const air = ac.createBiquadFilter(); air.type = 'highshelf'; air.frequency.value = 3500; air.gain.value = -4;
+  out = ac.createGain(); out.gain.value = .7;
+  const rev = ac.createConvolver(), wet = ac.createGain(); wet.gain.value = .2;
+  const sr = ac.sampleRate, len = Math.floor(sr * 1.6), ib = ac.createBuffer(2, len, sr);
+  for (let c = 0; c < 2; c++){ const d = ib.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3.5); }
+  rev.buffer = ib;
+  out.connect(body); body.connect(air); air.connect(comp); air.connect(rev); rev.connect(wet); wet.connect(comp); comp.connect(ac.destination);
+}
+function stringBuffer(f, bright){
+  const key = Math.round(f * 10) + ':' + bright; if (cache.has(key)) return cache.get(key);
+  const sr = ac.sampleRate, len = Math.floor(sr * 4), b = ac.createBuffer(1, len, sr), d = b.getChannelData(0);
+  const n = Math.max(2, Math.floor(sr / f)); let prev = 0;
+  for (let i = 0; i < n; i++){ const x = Math.random() * 2 - 1; prev = prev * (1 - bright) + x * bright; d[i] = prev; }
+  const damp = .4993 + Math.min(.0005, 60 / f * .0005);
+  for (let i = n; i < len; i++) d[i] = damp * (d[i - n] + d[i - n - 1 < 0 ? 0 : i - n - 1]);
+  const o = { b, rate: f * (n + .5) / sr }; cache.set(key, o); return o;
+}
+const ringing = [null, null, null, null, null, null];
+function playString(i, vel, where){
+  if (!ac) return;
+  const fret = stringFret(i), now = ac.currentTime;
+  if (ringing[i]){ ringing[i].g.gain.setTargetAtTime(0, now, .015); ringing[i].src.stop(now + .1); ringing[i] = null; } // a new pluck stops the old note on that string
+  if (fret < 0){ // muted string: a soft dead thump
+    const n = ac.createBufferSource(), nb = ac.createBuffer(1, 2400, ac.sampleRate), d = nb.getChannelData(0);
+    for (let k = 0; k < d.length; k++) d[k] = (Math.random() * 2 - 1) * Math.pow(1 - k / d.length, 6);
+    const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900; const g = ac.createGain(); g.gain.value = .12 * vel;
+    n.buffer = nb; n.connect(lp); lp.connect(g); g.connect(out); n.start(); return;
+  }
+  const f = OPEN[i] * Math.pow(2, fret / 12);
+  const { b, rate } = stringBuffer(f, .55 + vel * .35);
+  const src = ac.createBufferSource(); src.buffer = b; src.playbackRate.value = rate;
+  const g = ac.createGain(); g.gain.value = .22 + vel * .4;
+  const p = ac.createPanner(); p.panningModel = 'HRTF'; p.refDistance = .6; p.rolloffFactor = .5;
+  if (p.positionX){ p.positionX.value = where.x; p.positionY.value = where.y; p.positionZ.value = where.z; } else p.setPosition(where.x, where.y, where.z);
+  src.connect(g); g.connect(p); p.connect(out); src.start(); src.stop(now + 4);
+  ringing[i] = { src, g };
+}
+const _cp = new THREE.Vector3(), _q = new THREE.Quaternion(), _fw = new THREE.Vector3(), _up = new THREE.Vector3();
+function updateListener(){
+  if (!ac) return;
+  const cam = renderer.xr.isPresenting ? renderer.xr.getCamera() : camera;
+  cam.getWorldPosition(_cp); cam.getWorldQuaternion(_q); _fw.set(0, 0, -1).applyQuaternion(_q); _up.set(0, 1, 0).applyQuaternion(_q);
+  const L = ac.listener;
+  if (L.positionX){ L.positionX.value = _cp.x; L.positionY.value = _cp.y; L.positionZ.value = _cp.z;
+    L.forwardX.value = _fw.x; L.forwardY.value = _fw.y; L.forwardZ.value = _fw.z; L.upX.value = _up.x; L.upY.value = _up.y; L.upZ.value = _up.z; }
+  else { L.setPosition(_cp.x, _cp.y, _cp.z); L.setOrientation(_fw.x, _fw.y, _fw.z, _up.x, _up.y, _up.z); }
+}
+
+/* ---------- the guitar (built in its own space: x along the neck, y across the strings, z out of the top) ---------- */
+const guitar = new THREE.Group(); scene.add(guitar);
+const ACCENT = new THREE.Color(0xffcf5c), NEON = new THREE.Color(0xb9adff);
+const NUT_X = .70, BRIDGE_X = -.17, SCALE_LEN = .648, STR_Z = .012;
+const ZONE_W = .05, ZONES = CHORDS.length; // chord zones run from the nut toward the body
+{
+  // body outline: lower bout, waist, upper bout, neck joint
+  const key = [[-.30, 0], [-.27, .14], [-.20, .19], [-.10, .15], [-.04, .115], [.04, .13], [.12, .14], [.19, .10], [.23, .035], [.24, 0]];
+  const curve = new THREE.CatmullRomCurve3(key.map(([x, y]) => new THREE.Vector3(x, y, 0)));
+  const pts = curve.getPoints(40); const shape = new THREE.Shape();
+  shape.moveTo(pts[0].x, pts[0].y); pts.forEach(p => shape.lineTo(p.x, p.y)); [...pts].reverse().forEach(p => shape.lineTo(p.x, -p.y));
+  const hole = new THREE.Path(); hole.absarc(.06, 0, .045, 0, Math.PI * 2, true); shape.holes.push(hole);
+  const bodyG = new THREE.ExtrudeGeometry(shape, { depth: .09, bevelEnabled: true, bevelThickness: .006, bevelSize: .006, bevelSegments: 2, curveSegments: 24 });
+  bodyG.translate(0, 0, -.09);
+  const body = new THREE.Mesh(bodyG, new THREE.MeshBasicMaterial({ color: 0x110d2e, transparent: true, opacity: .94 }));
+  const edges = new THREE.LineSegments(new THREE.EdgesGeometry(bodyG, 30), new THREE.LineBasicMaterial({ color: NEON }));
+  const ring = new THREE.Mesh(new THREE.RingGeometry(.045, .052, 48), new THREE.MeshBasicMaterial({ color: ACCENT, transparent: true, opacity: .85, side: THREE.DoubleSide }));
+  ring.position.set(.06, 0, .001);
+  const inner = new THREE.Mesh(new THREE.CircleGeometry(.045, 48), new THREE.MeshBasicMaterial({ color: 0x050412 })); inner.position.set(.06, 0, -.02);
+  const bridge = new THREE.Mesh(new THREE.BoxGeometry(.018, .085, .008), new THREE.MeshBasicMaterial({ color: 0x2b2370 })); bridge.position.set(BRIDGE_X, 0, .004);
+  const neck = new THREE.Mesh(new THREE.BoxGeometry(NUT_X - .22, .052, .022), new THREE.MeshBasicMaterial({ color: 0x14103a })); neck.position.set((NUT_X + .22) / 2, 0, -.006);
+  const neckEdges = new THREE.LineSegments(new THREE.EdgesGeometry(neck.geometry), new THREE.LineBasicMaterial({ color: NEON, transparent: true, opacity: .6 })); neckEdges.position.copy(neck.position);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(.17, .085, .018), new THREE.MeshBasicMaterial({ color: 0x1a1446 })); head.position.set(NUT_X + .09, 0, -.006);
+  const headEdges = new THREE.LineSegments(new THREE.EdgesGeometry(head.geometry), new THREE.LineBasicMaterial({ color: NEON })); headEdges.position.copy(head.position);
+  const nut = new THREE.Mesh(new THREE.BoxGeometry(.006, .054, .008), new THREE.MeshBasicMaterial({ color: 0xeeedff })); nut.position.set(NUT_X, 0, .006);
+  guitar.add(body, edges, inner, ring, bridge, neck, neckEdges, head, headEdges, nut);
+  // frets at their real positions
+  const fretPts = [];
+  for (let n = 1; n <= 14; n++){ const x = NUT_X - SCALE_LEN * (1 - Math.pow(2, -n / 12)); if (x < .23) break; fretPts.push(x, -.026, .006, x, .026, .006); }
+  const fg = new THREE.BufferGeometry(); fg.setAttribute('position', new THREE.Float32BufferAttribute(fretPts, 3));
+  guitar.add(new THREE.LineSegments(fg, new THREE.LineBasicMaterial({ color: 0x6f66b8 })));
+}
+// chord zone labels on the fretboard
+const zoneLabels = CHORDS.map((c, z) => {
+  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 96; const g = cv.getContext('2d');
+  const draw = on => { g.clearRect(0, 0, 128, 96); g.fillStyle = on ? '#ffcf5c' : 'rgba(157,140,255,.32)'; g.beginPath(); g.roundRect(6, 6, 116, 84, 18); g.fill();
+    g.fillStyle = on ? '#1c1400' : '#eeedff'; g.font = '700 52px Inter, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(c.name, 64, 50); tex.needsUpdate = true; };
+  const tex = new THREE.CanvasTexture(cv);
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(.044, .033), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }));
+  m.position.set(NUT_X - ZONE_W * (z + .5), 0, .0065); m.rotation.z = Math.PI / 2; guitar.add(m);
+  draw(false); return { m, draw };
+});
+function setChord(z){
+  if (z === chord) return;
+  if (chord >= 0) zoneLabels[chord].draw(false);
+  chord = z; if (chord >= 0) zoneLabels[chord].draw(true);
+  document.querySelectorAll('#chordRow button').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.z === chord)));
+}
+
+/* ---------- strings ---------- */
+const SEG = 48, RING = 5;
+const TOUCH = .005, RELEASE = .011; // steel strings are stiff: they bend only about a centimetre before slipping off
+const STRUM_U = [.04, .34];          // only the part over the body plays; the neck end is for the fretting hand
+const tmpV = new THREE.Vector3();
+class GString {
+  constructor(i){
+    this.i = i; const yB = (2.5 - i) * .0105, yN = (2.5 - i) * .0072; // low E on the high side of the neck
+    this.a = new THREE.Vector3(BRIDGE_X, yB, STR_Z); this.b = new THREE.Vector3(NUT_X, yN, STR_Z);
+    this.dir = this.b.clone().sub(this.a); this.len = this.dir.length(); this.dir.normalize();
+    this.e1 = new THREE.Vector3(0, 0, 1); this.e2 = new THREE.Vector3().crossVectors(this.dir, this.e1).normalize();
+    this.r = .0009 + (5 - i) * .00028;
+    this.amp = 0; this.t0 = 0; this.pos = .2; this.last = 0; this.bend = null; this.dirty = true;
+    const n = (SEG + 1) * RING, pos = new Float32Array(n * 3), idx = [];
+    for (let s = 0; s < SEG; s++) for (let j = 0; j < RING; j++){ const a = s * RING + j, b = s * RING + (j + 1) % RING; idx.push(a, a + RING, b, b, a + RING, b + RING); }
+    const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setIndex(idx);
+    this.mat = new THREE.MeshBasicMaterial({ color: 0xd9d4ff });
+    this.mesh = new THREE.Mesh(geo, this.mat); this.mesh.frustumCulled = false; guitar.add(this.mesh);
+    const glowGeo = geo.clone(); glowGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+    this.glowMat = new THREE.MeshBasicMaterial({ color: ACCENT, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+    this.glow = new THREE.Mesh(glowGeo, this.glowMat); this.glow.frustumCulled = false; guitar.add(this.glow);
+    this.update(0, true);
+  }
+  closest(p){ const v = p.clone().sub(this.a), t = v.dot(this.dir) / this.len, tc = Math.max(0, Math.min(1, t));
+    const c = this.a.clone().addScaledVector(this.dir, tc * this.len), d = p.clone().sub(c); return { u: t, c, d, dist: d.length() }; }
+  update(now, force){
+    const el = now - this.t0, A = this.amp * Math.exp(-el / 1400), active = A > .002 || this.bend;
+    if (!active && !force && !this.dirty) return; this.dirty = !!active;
+    const fret = stringFret(this.i), endU = fret > 0 ? 1 - (SCALE_LEN * (1 - Math.pow(2, -fret / 12))) / this.len : 1; // vibrating part ends at the fret
+    const ph = el / 1000 * Math.PI * 2 * 11, maxD = .004;
+    for (const [mesh, rr] of [[this.mesh, this.r], [this.glow, this.r * 3.5]]){
+      const arr = mesh.geometry.attributes.position.array;
+      for (let s = 0; s <= SEG; s++){
+        const u = s / SEG; let ox = 0, oy = 0, oz = 0;
+        if (this.bend){ const bu = this.bend.u, k = u < bu ? u / bu : u < endU ? (endU - u) / (endU - bu) : 0; ox = this.bend.vec.x * k; oy = this.bend.vec.y * k; oz = this.bend.vec.z * k; }
+        else if (A > .002 && u < endU){ const uu = u / endU, sh = uu < this.pos ? uu / this.pos : (1 - uu) / (1 - this.pos), w = A * maxD * sh * Math.cos(ph); ox = this.e2.x * w; oy = this.e2.y * w; oz = this.e2.z * w; }
+        const cx = this.a.x + this.dir.x * this.len * u + ox, cy = this.a.y + this.dir.y * this.len * u + oy, cz = this.a.z + this.dir.z * this.len * u + oz;
+        for (let j = 0; j < RING; j++){ const t = j / RING * Math.PI * 2, c = Math.cos(t) * rr, sn = Math.sin(t) * rr, k = (s * RING + j) * 3;
+          arr[k] = cx + this.e1.x * c + this.e2.x * sn; arr[k + 1] = cy + this.e1.y * c + this.e2.y * sn; arr[k + 2] = cz + this.e1.z * c + this.e2.z * sn; }
+      }
+      mesh.geometry.attributes.position.needsUpdate = true;
+    }
+    const tension = this.bend ? Math.min(1, this.bend.vec.length() / RELEASE) : 0;
+    this.glowMat.opacity = Math.min(.9, A * .8 + tension * .5);
+    this.mat.color.set(stringFret(this.i) < 0 ? 0x5b5590 : 0xd9d4ff);
+  }
+}
+const gstrings = [0, 1, 2, 3, 4, 5].map(i => new GString(i));
+function pluck(s, u, vel, now){
+  if (now - s.last < 45) return;
+  s.last = now; s.t0 = now; s.pos = Math.min(.9, Math.max(.1, u)); s.bend = null; s.amp = .4 + vel * .6;
+  playString(s.i, vel, guitar.localToWorld(s.a.clone().lerp(s.b, u)));
+  buzz(vel);
+}
+
+/* ---------- strumming finger (in guitar space): touch, bend a little, slip off and sound ---------- */
+function fingerStep(f, p, now){
+  if (!f.prev){ f.prev = p.clone(); f.t = now; return; }
+  const dt = Math.max(4, now - f.t) / 1000; f.t = now; f.speed = f.prev.distanceTo(p) / dt;
+  const velFor = push => Math.max(.25, Math.min(1, .3 + f.speed * .3 + push / RELEASE * .25));
+  if (f.grab){
+    const g = f.grab, c = g.s.closest(p), push = c.d.dot(g.side) + TOUCH;
+    if (push >= RELEASE || c.u < STRUM_U[0] - .03 || c.u > STRUM_U[1] + .03){ f.grab = null; f.after = g.s; f.afterT = now; pluck(g.s, c.u, velFor(push), now); }
+    else if (push < -.004){ g.s.bend = null; f.grab = null; }
+    else { g.s.bend = { u: Math.max(.03, c.u), vec: c.d.clone().addScaledVector(g.side, TOUCH) }; }
+  }
+  // strings the finger passed in this step, in the order it met them (so a strum rolls across the strings)
+  const hits = [];
+  for (const s of gstrings){
+    if (f.grab?.s === s || (s === f.after && now - f.afterT < 90)) continue;
+    const c = s.closest(p), cp = s.closest(f.prev);
+    if (c.u < STRUM_U[0] || c.u > STRUM_U[1]) continue;
+    if (c.dist < TOUCH && cp.dist >= TOUCH && !f.grab){ const side = cp.d.clone().negate().normalize(); f.grab = { s, side }; s.bend = { u: c.u, vec: c.d.clone().addScaledVector(side, TOUCH) }; }
+    else if (c.d.dot(cp.d) < 0 && Math.min(c.dist, cp.dist) < .05){ hits.push({ s, u: c.u, order: cp.dist }); }
+  }
+  hits.sort((a, b) => a.order - b.order).forEach((h, k) => setTimeout(() => pluck(h.s, h.u, velFor(RELEASE), performance.now()), k * 6));
+  f.prev.copy(p);
+}
+function releaseFinger(f){ if (f.grab){ f.grab.s.bend = null; f.grab = null; } f.prev = null; }
+
+/* ---------- placing the guitar ---------- */
+let lefty = false;
+function placeGuitar(headPos, yawForward){
+  // body at your hip, a little to the strumming side; neck out to the fretting side and tilted up; strings facing you
+  const fwd = yawForward.clone().setY(0).normalize(), right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0)).normalize();
+  const side = lefty ? -1 : 1;
+  const pos = headPos.clone().addScaledVector(fwd, .32).addScaledVector(right, .12 * side); pos.y = headPos.y - .5;
+  const x = right.clone().multiplyScalar(-side).addScaledVector(new THREE.Vector3(0, 1, 0), .42).normalize(); // along the neck
+  let z = fwd.clone().negate().addScaledVector(new THREE.Vector3(0, 1, 0), .55).normalize();                 // out of the top, toward you
+  z.addScaledVector(x, -x.dot(z)).normalize();
+  const y = new THREE.Vector3().crossVectors(z, x);
+  guitar.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
+  guitar.position.copy(pos); guitar.updateMatrixWorld(true);
+  applyFlip(y.y < 0);
+}
+// keep the low E string on top whichever hand you play with: mirror the guitar across its neck when needed
+function applyFlip(flip){
+  guitar.scale.set(1, flip ? -1 : 1, 1);
+  zoneLabels.forEach(l => { l.m.scale.x = flip ? -1 : 1; }); // so chord names don't read backwards
+  guitar.updateMatrixWorld(true);
+}
+function fitDesktop(){
+  if (renderer.xr.isPresenting) return;
+  guitar.position.set(lefty ? -.18 : .18, 1.05, -.42);
+  const x = new THREE.Vector3(lefty ? 1 : -1, .42, 0).normalize(), z0 = new THREE.Vector3(0, .25, 1).normalize();
+  const z = z0.addScaledVector(x, -x.dot(z0)).normalize(), y = new THREE.Vector3().crossVectors(z, x);
+  guitar.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z)); applyFlip(y.y < 0);
+}
+guitar.traverse(o => { if (o.material) o.material.side = THREE.DoubleSide; }); // mirrored geometry must still render
+fitDesktop();
+
+/* ---------- XR inputs ---------- */
+const JOINT_NAMES = ['wrist','thumb-metacarpal','thumb-phalanx-proximal','thumb-phalanx-distal','thumb-tip',
+  'index-finger-metacarpal','index-finger-phalanx-proximal','index-finger-phalanx-intermediate','index-finger-phalanx-distal','index-finger-tip',
+  'middle-finger-metacarpal','middle-finger-phalanx-proximal','middle-finger-phalanx-intermediate','middle-finger-phalanx-distal','middle-finger-tip',
+  'ring-finger-metacarpal','ring-finger-phalanx-proximal','ring-finger-phalanx-intermediate','ring-finger-phalanx-distal','ring-finger-tip',
+  'pinky-finger-metacarpal','pinky-finger-phalanx-proximal','pinky-finger-phalanx-intermediate','pinky-finger-phalanx-distal','pinky-finger-tip'];
+const FRET_TIPS = ['index-finger-tip', 'middle-finger-tip', 'ring-finger-tip', 'pinky-finger-tip', 'thumb-tip'];
+const jointGeo = new THREE.SphereGeometry(1, 10, 8);
+const jointMat = new THREE.MeshBasicMaterial({ color: 0x8cffbe, transparent: true, opacity: .55 }), tipMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+const slots = [0, 1].map(i => {
+  const ctrl = renderer.xr.getController(i), grip = renderer.xr.getControllerGrip(i), hand = renderer.xr.getHand(i);
+  scene.add(ctrl, grip, hand);
+  const tip = new THREE.Mesh(new THREE.SphereGeometry(.01, 16, 12), tipMat); tip.position.set(0, -.015, -.06); tip.visible = false; grip.add(tip);
+  const slot = { ctrl, grip, hand, tip, source: null, pinching: false, finger: {}, decorated: false };
+  ctrl.addEventListener('connected', e => { slot.source = e.data; tip.visible = !e.data.hand; });
+  ctrl.addEventListener('disconnected', () => { slot.source = null; slot.pinching = false; tip.visible = false; releaseFinger(slot.finger); });
+  ctrl.addEventListener('selectstart', () => { slot.pinching = true; initAudio(); });
+  ctrl.addEventListener('selectend', () => { slot.pinching = false; });
+  return slot;
+});
+function decorateHand(slot){
+  if (slot.decorated || !slot.hand.joints['index-finger-tip']) return;
+  for (const n of JOINT_NAMES){ const j = slot.hand.joints[n]; if (!j) return; const t = n === 'index-finger-tip';
+    const m = new THREE.Mesh(jointGeo, t ? tipMat : jointMat); m.scale.setScalar(t ? .008 : .005); j.add(m); }
+  slot.decorated = true;
+}
+const isStrumSlot = s => (s.source?.handedness || 'none') === (lefty ? 'left' : 'right');
+const jointWorld = (slot, n) => { const j = slot.hand.joints[n]; return j && j.visible !== false ? j.getWorldPosition(new THREE.Vector3()) : null; };
+let activeSlot = null;
+function buzz(vel){ const h = activeSlot?.source?.gamepad?.hapticActuators?.[0]; if (h?.pulse && !activeSlot.source.hand) h.pulse(.25 + vel * .5, 18); }
+
+// fretting: any fingertip of the fretting hand resting on a chord zone of the neck holds that chord
+function fretZone(localP){
+  if (localP.x > NUT_X + .01 || localP.x < NUT_X - ZONE_W * ZONES - .01) return -1;
+  if (Math.abs(localP.y) > .055 || localP.z < -.05 || localP.z > .06) return -1;
+  return Math.max(0, Math.min(ZONES - 1, Math.floor((NUT_X - localP.x) / ZONE_W)));
+}
+// moving the guitar: pinch and hold on the body, then drag
+let carry = null;
+function updateCarry(now){
+  for (const s of slots){
+    if (!s.source) continue;
+    const p = s.source.hand ? (() => { const a = jointWorld(s, 'thumb-tip'), b = jointWorld(s, 'index-finger-tip'); return a && b ? a.lerp(b, .5) : null; })() : s.tip.getWorldPosition(new THREE.Vector3());
+    if (!p) continue;
+    if (carry?.slot === s){
+      if (!s.pinching){ carry = null; continue; }
+      if (now - carry.t0 > 300){ guitar.position.copy(p).add(carry.offset); guitar.updateMatrixWorld(true); }
+    } else if (!carry && s.pinching && !s.wasPinching){
+      const l = guitar.worldToLocal(p.clone());
+      if (l.x < .2 && l.x > -.32 && Math.abs(l.y) < .2 && Math.abs(l.z) < .12 && !(l.x > -.2 && l.x < .12 && Math.abs(l.y) < .04)) // on the body, but not over the strings
+        carry = { slot: s, t0: now, offset: guitar.position.clone().sub(p) };
+    }
+    s.wasPinching = s.pinching;
+  }
+}
+
+/* ---------- floating instructions inside VR ---------- */
+const panel = (() => {
+  const c = document.createElement('canvas'); c.width = 1024; c.height = 300; const g = c.getContext('2d');
+  g.fillStyle = 'rgba(21,16,56,.88)'; g.beginPath(); g.roundRect(0, 0, 1024, 300, 36); g.fill();
+  g.fillStyle = '#ffcf5c'; g.font = '700 46px Unbounded, Inter, sans-serif'; g.textAlign = 'center'; g.fillText('Gitaar', 512, 72);
+  g.fillStyle = '#eeedff'; g.font = '500 33px Inter, sans-serif';
+  ['Rest your fretting hand on a chord name on the neck',
+   'Strum the strings over the sound hole with your other hand',
+   'Pinch and hold the body to move the guitar'].forEach((t, i) => g.fillText(t, 512, 140 + i * 52));
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(.9, .264), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true }));
+  m.visible = false; scene.add(m); return m;
+})();
+let panelHideAt = 0;
+
+/* ---------- desktop preview: the mouse strums on the plane of the strings ---------- */
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), mouse = { finger: {}, down: false };
+const mouseTip = new THREE.Mesh(new THREE.SphereGeometry(.008, 16, 12), tipMat); mouseTip.visible = false; scene.add(mouseTip);
+function stringPlanePoint(e){
+  ndc.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(ndc, camera);
+  const n = new THREE.Vector3(0, 0, 1).applyQuaternion(guitar.quaternion).multiply(new THREE.Vector3(1, 1, 1)).normalize();
+  const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(n, guitar.localToWorld(new THREE.Vector3(0, 0, STR_Z)));
+  return ray.ray.intersectPlane(plane, new THREE.Vector3());
+}
+const cvs = renderer.domElement;
+cvs.addEventListener('pointerdown', e => { if (renderer.xr.isPresenting) return; initAudio(); cvs.setPointerCapture(e.pointerId);
+  const w = stringPlanePoint(e); if (!w) return; mouse.down = true; mouse.finger.prev = null; fingerStep(mouse.finger, guitar.worldToLocal(w.clone()), performance.now()); });
+cvs.addEventListener('pointermove', e => { if (renderer.xr.isPresenting) return; const w = stringPlanePoint(e); if (!w) return;
+  mouseTip.position.copy(w); mouseTip.visible = true;
+  if (mouse.down){
+    // the mouse sits on the string plane; nudge it a hair forward so it can bend strings it reaches
+    const l = guitar.worldToLocal(w.clone()); fingerStep(mouse.finger, l, performance.now());
+  } });
+const endPointer = () => { mouse.down = false; releaseFinger(mouse.finger); };
+cvs.addEventListener('pointerup', endPointer); cvs.addEventListener('pointercancel', endPointer);
+cvs.addEventListener('pointerleave', () => { mouseTip.visible = false; });
+addEventListener('keydown', e => {
+  if (e.repeat) return;
+  const n = parseInt(e.key, 10);
+  if (n >= 1 && n <= ZONES) setChord(n - 1); else if (n === 0) setChord(-1);
+});
+const row = document.getElementById('chordRow');
+[{ name: 'Open', z: -1, key: '0' }, ...CHORDS.map((c, z) => ({ name: c.name, z, key: String(z + 1) }))].forEach(c => {
+  const b = document.createElement('button'); b.dataset.z = c.z; b.innerHTML = `${c.name}<kbd>${c.key}</kbd>`; b.setAttribute('aria-pressed', String(c.z === -1));
+  b.onclick = () => { initAudio(); setChord(c.z); }; row.appendChild(b);
+});
+
+/* ---------- loop ---------- */
+renderer.setAnimationLoop(() => {
+  const now = performance.now();
+  if (renderer.xr.isPresenting){
+    updateCarry(now);
+    let zone = -1;
+    for (const s of slots){
+      if (!s.source) continue;
+      if (s.source.hand) decorateHand(s);
+      if (isStrumSlot(s)){
+        if (s.pinching || carry?.slot === s){ releaseFinger(s.finger); continue; }
+        const w = s.source.hand ? jointWorld(s, 'index-finger-tip') : s.tip.getWorldPosition(new THREE.Vector3());
+        if (!w){ releaseFinger(s.finger); continue; }
+        activeSlot = s; fingerStep(s.finger, guitar.worldToLocal(w), now); activeSlot = null;
+      } else if (carry?.slot !== s){
+        const tips = s.source.hand ? FRET_TIPS.map(n => jointWorld(s, n)).filter(Boolean) : [s.tip.getWorldPosition(new THREE.Vector3())];
+        for (const t of tips){ const z = fretZone(guitar.worldToLocal(t)); if (z >= 0){ zone = Math.max(zone, z); } }
+      }
+    }
+    setChord(zone);
+    if (panelHideAt && now > panelHideAt){ panel.visible = false; panelHideAt = 0; }
+  }
+  for (const s of gstrings) s.update(now);
+  updateListener();
+  renderer.render(scene, camera);
+});
+
+/* ---------- UI ---------- */
+const msg = document.getElementById('msg');
+function say(t, ms){ msg.textContent = t; msg.hidden = !t; clearTimeout(say.t); if (ms) say.t = setTimeout(() => msg.hidden = true, ms); }
+document.getElementById('url').textContent = location.href.split('#')[0];
+const intro = document.getElementById('intro');
+const start = () => { initAudio(); intro.hidden = true; lefty = document.getElementById('optLefty').checked; fitDesktop(); };
+document.getElementById('goDesk').onclick = start;
+async function enterVR(){
+  start();
+  try {
+    const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor', 'hand-tracking'] });
+    await renderer.xr.setSession(session);
+    document.getElementById('chordBar').hidden = true;
+    // wait one frame for a head pose, then put the guitar and the instructions in front of you
+    let placed = false;
+    const place = () => {
+      const cam = renderer.xr.getCamera(), head = cam.getWorldPosition(new THREE.Vector3());
+      if (head.y < .5) head.y = 1.6;
+      const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.getWorldQuaternion(new THREE.Quaternion()));
+      placeGuitar(head, fwd);
+      const f = fwd.clone().setY(0).normalize(); panel.position.copy(head).addScaledVector(f, 1.1); panel.position.y = head.y + .25; panel.lookAt(head);
+      panel.visible = true; panelHideAt = performance.now() + 12000; placed = true;
+    };
+    setTimeout(place, 300);
+    session.addEventListener('end', () => { panel.visible = false; carry = null; slots.forEach(s => releaseFinger(s.finger)); document.getElementById('chordBar').hidden = false; fitDesktop(); });
+  } catch (err){ say('Could not start VR: ' + (err.message || err), 5000); }
+}
+(async () => {
+  const ok = navigator.xr && await navigator.xr.isSessionSupported('immersive-vr').catch(() => false);
+  for (const id of ['goVR', 'bVR']){ const b = document.getElementById(id); b.hidden = !ok; b.onclick = enterVR; }
+  document.getElementById('noVR').hidden = !!ok;
+})();
+</script>
+</html>
