@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Lichtsnaren VR</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Inter:wght@400;500;600&display=swap">
+<style>
+/* Layout: full-bleed 3D view; a slim control bar on top and a start card in the middle until play begins. Single dark look by choice. */
+:root{
+  --bg:#07061a; --bg2:#151038; --fg:#eeedff; --dim:#a39fd2; --line:#332c70; --accent:#ffcf5c; --accent-ink:#1c1400;
+  --font-d:"Unbounded",system-ui,sans-serif; --font-b:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
+  color-scheme:dark;
+}
+html,body{height:100%;margin:0}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--fg);font-family:var(--font-b);overflow:hidden}
+canvas{display:block;touch-action:none}
+.bar{position:fixed;top:0;left:0;right:0;z-index:5;display:flex;flex-wrap:wrap;gap:8px;align-items:center;
+  padding-top:calc(env(safe-area-inset-top,0px) + 12px);padding-bottom:20px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  background:linear-gradient(var(--bg) 35%,transparent);pointer-events:none;user-select:none}
+.bar>*{pointer-events:auto}
+.brand{font:700 16px/1 var(--font-d);margin-right:auto;pointer-events:none}
+.brand span{color:var(--accent)}
+button{font:500 13px/1 var(--font-b);color:var(--fg);background:rgba(255,255,255,.06);border:1px solid var(--line);border-radius:999px;padding:8px 14px;cursor:pointer}
+button:hover{background:rgba(255,255,255,.12)}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+.hint{position:fixed;left:0;right:0;bottom:0;z-index:5;text-align:center;color:var(--dim);font-size:13px;line-height:1.5;
+  padding-bottom:calc(env(safe-area-inset-bottom,0px) + 14px);padding-top:24px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  background:linear-gradient(transparent,var(--bg) 70%);pointer-events:none;text-wrap:balance}
+.hint b{color:var(--fg);font-weight:600}
+.intro{position:fixed;inset:0;z-index:10;display:grid;place-items:center;background:rgba(7,6,26,.78);backdrop-filter:blur(3px);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.card{max-width:480px;text-align:center;display:grid;gap:14px}
+.card h1{font:700 clamp(28px,7vw,44px)/1.05 var(--font-d);margin:0;text-wrap:balance}
+.card h1 span{color:var(--accent)}
+.card p{margin:0;color:var(--dim);font-size:15px;line-height:1.55}
+.card .go{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:4px}
+.card .go button{font-size:15px;padding:12px 20px}
+.card label{color:var(--dim);font-size:14px;display:inline-flex;gap:8px;align-items:center;justify-content:center;cursor:pointer}
+.card small{color:var(--dim);font-size:12px;line-height:1.5}
+.card code{color:var(--fg);font-size:12px;word-break:break-all}
+#msg{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:11;max-width:min(420px,calc(100% - 32px));
+  background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:16px 18px;font-size:14px;line-height:1.5;text-align:center}
+@media (max-width:520px){.brand{width:100%}}
+</style>
+
+<div class="bar">
+  <div class="brand">Licht<span>snaren</span> VR</div>
+  <button id="bVR" hidden>Enter VR</button>
+  <button id="bUndo" title="Undo (Ctrl+Z)">Undo</button>
+  <button id="bClear">Clear</button>
+  <button id="bExample">Example</button>
+</div>
+<div class="hint" id="hint"><b>Drag</b> to stretch a string. <b>Drag through</b> a string to pluck it. <b>Right-click</b> a string to remove it. Ctrl+Z undoes.</div>
+<div id="msg" hidden></div>
+
+<div class="intro" id="intro">
+  <div class="card">
+    <h1>Licht<span>snaren</span> VR</h1>
+    <p>Stretch strings of light in the air around you and pluck them with your fingers. Built for Meta Quest hand tracking; controllers work too.</p>
+    <label><input type="checkbox" id="optExample"> Start with example strings</label>
+    <div class="go">
+      <button class="primary" id="goVR" hidden>Enter VR</button>
+      <button id="goDesk">Try it in the browser</button>
+    </div>
+    <small id="noVR" hidden>No VR headset found. To play in VR, open this page in the Meta Quest browser:<br><code id="url"></code></small>
+  </div>
+</div>
+
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }</script>
+<script type="module">
+import * as THREE from 'three';
+
+/* ---------- renderer, scene, camera ---------- */
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local-floor');
+document.body.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x07061a);
+scene.fog = new THREE.FogExp2(0x07061a, .12);
+const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, .01, 60);
+camera.position.set(0, 1.55, .25);
+camera.lookAt(0, 1.3, -.5);
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+
+// surroundings: a floor of soft dots and a far starfield, so you have a sense of space
+{
+  const dots = [], stars = [];
+  for (let x = -6; x <= 6; x += .4) for (let z = -6; z <= 6; z += .4) if (x * x + z * z < 36) dots.push(x, 0, z);
+  for (let i = 0; i < 900; i++){ const v = new THREE.Vector3().randomDirection().multiplyScalar(18 + Math.random() * 12); if (v.y > -2) stars.push(v.x, Math.abs(v.y) + 1, v.z); }
+  const mk = (arr, size, color, op) => { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3));
+    return new THREE.Points(g, new THREE.PointsMaterial({ size, color, transparent: true, opacity: op, depthWrite: false })); };
+  scene.add(mk(dots, .02, 0x6a5fd0, .55), mk(stars, .09, 0xc9c4ff, .8));
+}
+
+/* ---------- music ---------- */
+const SCALE = [0, 3, 5, 7, 10]; // minor pentatonic: every combination sounds fine
+const ROOT = 110; // A2
+function noteFor(len){ // len in metres: 1.2 m plays lowest, 0.15 m highest
+  const r = Math.max(0, Math.min(1, (len - .15) / 1.05)), steps = SCALE.length * 3;
+  const k = Math.round((1 - r) * (steps - 1));
+  return { f: ROOT * Math.pow(2, (SCALE[k % SCALE.length] + 12 * Math.floor(k / SCALE.length)) / 12), k, steps };
+}
+const hueFor = (k, steps) => (330 - (k / (steps - 1)) * 250) / 360;
+
+/* ---------- audio: Karplus–Strong plucks, placed in 3D ---------- */
+let ac = null, master = null; const cache = new Map();
+function initAudio(){
+  if (ac){ ac.resume(); return; }
+  ac = new (window.AudioContext || window.webkitAudioContext)();
+  const comp = ac.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 4;
+  master = ac.createGain(); master.gain.value = .8;
+  const rev = ac.createConvolver(), wet = ac.createGain(); wet.gain.value = .3;
+  const sr = ac.sampleRate, len = Math.floor(sr * 2.4), ib = ac.createBuffer(2, len, sr);
+  for (let c = 0; c < 2; c++){ const d = ib.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3.2); }
+  rev.buffer = ib; master.connect(comp); master.connect(rev); rev.connect(wet); wet.connect(comp); comp.connect(ac.destination);
+}
+function pluckBuffer(f){
+  const key = Math.round(f * 10); if (cache.has(key)) return cache.get(key);
+  const sr = ac.sampleRate, len = Math.floor(sr * 3.2), b = ac.createBuffer(1, len, sr), d = b.getChannelData(0);
+  const n = Math.max(2, Math.floor(sr / f)); let prev = 0;
+  for (let i = 0; i < n; i++){ const x = Math.random() * 2 - 1; prev = prev * .45 + x * .55; d[i] = prev; }
+  const damp = .4985 + Math.min(.0012, 40 / f * .0012);
+  for (let i = n; i < len; i++) d[i] = damp * (d[i - n] + d[i - n - 1 < 0 ? 0 : i - n - 1]);
+  const out = { b, rate: f * (n + .5) / sr }; cache.set(key, out); return out;
+}
+function playNote(f, vel, where){
+  if (!ac) return;
+  const { b, rate } = pluckBuffer(f);
+  const src = ac.createBufferSource(); src.buffer = b; src.playbackRate.value = rate;
+  const g = ac.createGain(); g.gain.value = .3 + vel * .6;
+  const p = ac.createPanner(); p.panningModel = 'HRTF'; p.distanceModel = 'inverse'; p.refDistance = .6; p.rolloffFactor = .6;
+  if (p.positionX){ p.positionX.value = where.x; p.positionY.value = where.y; p.positionZ.value = where.z; } else p.setPosition(where.x, where.y, where.z);
+  src.connect(g); g.connect(p); p.connect(master); src.start(); src.stop(ac.currentTime + 3.2);
+}
+const _fw = new THREE.Vector3(), _up = new THREE.Vector3(), _cp = new THREE.Vector3();
+function updateListener(){
+  if (!ac) return;
+  const cam = renderer.xr.isPresenting ? renderer.xr.getCamera() : camera;
+  cam.getWorldPosition(_cp); _fw.set(0, 0, -1).applyQuaternion(cam.getWorldQuaternion(new THREE.Quaternion()));
+  _up.set(0, 1, 0).applyQuaternion(cam.getWorldQuaternion(new THREE.Quaternion()));
+  const L = ac.listener;
+  if (L.positionX){ L.positionX.value = _cp.x; L.positionY.value = _cp.y; L.positionZ.value = _cp.z;
+    L.forwardX.value = _fw.x; L.forwardY.value = _fw.y; L.forwardZ.value = _fw.z; L.upX.value = _up.x; L.upY.value = _up.y; L.upZ.value = _up.z; }
+  else { L.setPosition(_cp.x, _cp.y, _cp.z); L.setOrientation(_fw.x, _fw.y, _fw.z, _up.x, _up.y, _up.z); }
+}
+
+/* ---------- strings ---------- */
+const SEG = 40, RING = 6, R_CORE = .0022, R_GLOW = .008;
+const TOUCH = .012;  // a fingertip touches a string within 1.2 cm
+const RELEASE = .035; // push it 3.5 cm and it slips off and sounds
+const MIN_LEN = .12, MAX_STRINGS = 16;
+let strings = []; const history = [];
+
+function tubeGeometry(radius){
+  const pos = new Float32Array((SEG + 1) * RING * 3), idx = [];
+  for (let i = 0; i < SEG; i++) for (let j = 0; j < RING; j++){
+    const a = i * RING + j, b = i * RING + (j + 1) % RING, c = a + RING, d = b + RING; idx.push(a, c, b, b, c, d);
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setIndex(idx);
+  g.userData.radius = radius; return g;
+}
+class LightString {
+  constructor(a, b){
+    this.a = a.clone(); this.b = b.clone();
+    this.dir = b.clone().sub(a); this.len = this.dir.length(); this.dir.normalize();
+    this.e1 = new THREE.Vector3().crossVectors(this.dir, Math.abs(this.dir.y) > .9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0)).normalize();
+    this.e2 = new THREE.Vector3().crossVectors(this.dir, this.e1).normalize();
+    const { f, k, steps } = noteFor(this.len); this.f = f; this.k = k;
+    this.color = new THREE.Color().setHSL(hueFor(k, steps), 1, .62);
+    this.amp = 0; this.t0 = 0; this.pos = .5; this.last = 0; this.bend = null; this.doomed = 0; this.dirty = true;
+    this.group = new THREE.Group();
+    this.core = new THREE.Mesh(tubeGeometry(R_CORE), new THREE.MeshBasicMaterial({ color: this.color.clone().lerp(new THREE.Color(1, 1, 1), .45) }));
+    this.glow = new THREE.Mesh(tubeGeometry(R_GLOW), new THREE.MeshBasicMaterial({ color: this.color, transparent: true, opacity: .22, blending: THREE.AdditiveBlending, depthWrite: false }));
+    const pegG = new THREE.SphereGeometry(.007, 12, 8), pegM = new THREE.MeshBasicMaterial({ color: this.color.clone().lerp(new THREE.Color(1, 1, 1), .5) });
+    const pa = new THREE.Mesh(pegG, pegM), pb = new THREE.Mesh(pegG, pegM); pa.position.copy(a); pb.position.copy(b);
+    this.core.frustumCulled = this.glow.frustumCulled = false;
+    this.group.add(this.glow, this.core, pa, pb); scene.add(this.group);
+    this.update(0, true);
+  }
+  dispose(){ scene.remove(this.group); this.group.traverse(o => { o.geometry?.dispose(); o.material?.dispose?.(); }); }
+  update(now, force){
+    const el = now - this.t0, A = this.amp * Math.exp(-el / 900);
+    const active = A > .002 || this.bend || this.doomed;
+    if (!active && !force && !this.dirty) return;
+    this.dirty = !!active;
+    const maxD = Math.min(.03, this.len * .04), ph = el / 1000 * Math.PI * 2 * (7 + this.k % 7);
+    const offs = [];
+    for (let i = 0; i <= SEG; i++){
+      const u = i / SEG, o = new THREE.Vector3();
+      if (this.bend){ const bu = this.bend.u; o.copy(this.bend.vec).multiplyScalar(u < bu ? u / bu : (1 - u) / (1 - bu)); }
+      else if (A > .002){ const sh = u < this.pos ? u / this.pos : (1 - u) / (1 - this.pos);
+        o.copy(this.e1).multiplyScalar(A * maxD * (sh * Math.cos(ph) + .25 * Math.sin(Math.PI * 2 * u) * Math.cos(ph * 2.01))); }
+      offs.push(o);
+    }
+    for (const mesh of [this.core, this.glow]){
+      const attr = mesh.geometry.attributes.position, r = mesh.geometry.userData.radius * (mesh === this.glow ? 1 + A * 1.2 : 1);
+      for (let i = 0; i <= SEG; i++){
+        const cx = this.a.x + this.dir.x * this.len * i / SEG + offs[i].x, cy = this.a.y + this.dir.y * this.len * i / SEG + offs[i].y, cz = this.a.z + this.dir.z * this.len * i / SEG + offs[i].z;
+        for (let j = 0; j < RING; j++){
+          const t = j / RING * Math.PI * 2, c = Math.cos(t) * r, s = Math.sin(t) * r, k = (i * RING + j) * 3;
+          attr.array[k] = cx + this.e1.x * c + this.e2.x * s; attr.array[k + 1] = cy + this.e1.y * c + this.e2.y * s; attr.array[k + 2] = cz + this.e1.z * c + this.e2.z * s;
+        }
+      }
+      attr.needsUpdate = true;
+    }
+    const tension = this.bend ? Math.min(1, this.bend.vec.length() / RELEASE) : 0;
+    this.glow.material.opacity = .22 + A * .45 + tension * .35;
+    this.glow.material.color.copy(this.doomed ? new THREE.Color(1, .25, .3) : this.color);
+  }
+  closest(p){ // closest point on the resting string to p
+    const v = p.clone().sub(this.a), t = v.dot(this.dir) / this.len, tc = Math.max(0, Math.min(1, t));
+    const c = this.a.clone().addScaledVector(this.dir, tc * this.len), d = p.clone().sub(c);
+    return { u: t, c, d, dist: d.length() };
+  }
+}
+function pluck(s, u, vel, now){
+  if (now - s.last < 70) return;
+  s.last = now; s.t0 = now; s.pos = Math.min(.92, Math.max(.08, u)); s.bend = null;
+  s.amp = Math.min(1, Math.max(s.amp * Math.exp(-(now - s.t0) / 900), .35 + vel * .65));
+  playNote(s.f, vel, s.a.clone().lerp(s.b, s.pos));
+  burst(s.a.clone().lerp(s.b, s.pos), s.color, 10 + Math.round(vel * 14));
+  buzz(vel);
+}
+function addString(a, b, quiet){
+  if (a.distanceTo(b) < MIN_LEN) return false;
+  if (strings.length >= MAX_STRINGS){ say(`That's the maximum of ${MAX_STRINGS} strings. Remove one first.`, 2500); return false; }
+  const s = new LightString(a, b); strings.push(s); history.push({ type: 'add', s });
+  if (!quiet) pluck(s, .5, .6, performance.now()); hidePanelSoon(); return true;
+}
+function removeString(s){
+  const i = strings.indexOf(s); if (i < 0) return;
+  strings.splice(i, 1); scene.remove(s.group); history.push({ type: 'remove', s, i });
+  for (let k = 0; k < 6; k++) burst(s.a.clone().lerp(s.b, k / 5), new THREE.Color(1, .3, .35), 4);
+  if (ac){ const o = ac.createOscillator(), g = ac.createGain();
+    o.frequency.setValueAtTime(420, ac.currentTime); o.frequency.exponentialRampToValueAtTime(70, ac.currentTime + .25);
+    g.gain.setValueAtTime(.18, ac.currentTime); g.gain.exponentialRampToValueAtTime(.001, ac.currentTime + .3);
+    o.connect(g); g.connect(master); o.start(); o.stop(ac.currentTime + .32); }
+}
+function undo(){
+  const h = history.pop(); if (!h) return;
+  if (h.type === 'add'){ const i = strings.indexOf(h.s); if (i >= 0){ strings.splice(i, 1); scene.remove(h.s.group); } }
+  else { strings.splice(Math.min(h.i, strings.length), 0, h.s); scene.add(h.s.group); pluck(h.s, .5, .5, performance.now()); }
+}
+function example(){
+  // a harp-like fan at arm's length, chest height, each string shorter than the last
+  const n = 9;
+  for (let i = 0; i < n; i++){
+    const half = (1.0 - i * .085) / 2, y = 1.0 + i * .06, tilt = (i % 2 ? 1 : -1) * .05;
+    addString(new THREE.Vector3(-half, y - tilt, -.5), new THREE.Vector3(half, y + tilt, -.5), true);
+  }
+}
+
+/* ---------- sparks ---------- */
+const SPARKS = 400, sparkPos = new Float32Array(SPARKS * 3), sparkCol = new Float32Array(SPARKS * 3), sparkVel = [], sparkLife = new Float32Array(SPARKS);
+let sparkNext = 0;
+const sparkGeo = new THREE.BufferGeometry();
+sparkGeo.setAttribute('position', new THREE.BufferAttribute(sparkPos, 3)); sparkGeo.setAttribute('color', new THREE.BufferAttribute(sparkCol, 3));
+for (let i = 0; i < SPARKS; i++){ sparkVel.push(new THREE.Vector3()); sparkPos[i * 3 + 1] = -99; }
+const sparkPts = new THREE.Points(sparkGeo, new THREE.PointsMaterial({ size: .008, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+sparkPts.frustumCulled = false; scene.add(sparkPts);
+function burst(p, color, n){
+  for (let k = 0; k < n; k++){
+    const i = sparkNext++ % SPARKS;
+    sparkPos.set([p.x, p.y, p.z], i * 3); sparkCol.set([color.r, color.g, color.b], i * 3);
+    sparkVel[i].randomDirection().multiplyScalar(.2 + Math.random() * .5); sparkLife[i] = 1;
+  }
+}
+function updateSparks(dt){
+  for (let i = 0; i < SPARKS; i++){
+    if (sparkLife[i] <= 0) continue;
+    sparkLife[i] -= dt * 1.4; sparkVel[i].y -= dt * .6; sparkVel[i].multiplyScalar(1 - dt * 1.5);
+    sparkPos[i * 3] += sparkVel[i].x * dt; sparkPos[i * 3 + 1] += sparkVel[i].y * dt; sparkPos[i * 3 + 2] += sparkVel[i].z * dt;
+    const f = Math.max(0, sparkLife[i]); sparkCol[i * 3] *= .985; sparkCol[i * 3 + 1] *= .985; sparkCol[i * 3 + 2] *= .985;
+    if (sparkLife[i] <= 0) sparkPos[i * 3 + 1] = -99;
+  }
+  sparkGeo.attributes.position.needsUpdate = sparkGeo.attributes.color.needsUpdate = true;
+}
+
+/* ---------- fingers: touch, bend, release ---------- */
+// A fingertip that touches a string pushes it; the string bends with the finger and sounds once pushed past RELEASE,
+// or when the finger slides off its end. Backing off before that lets it go silently, like easing off a real string.
+function fingerStep(f, p, now){
+  if (!f.prev){ f.prev = p.clone(); f.t = now; return; }
+  const dt = Math.max(4, now - f.t) / 1000; f.t = now;
+  f.speed = f.prev.distanceTo(p) / dt; // m/s
+  if (f.grab){
+    const g = f.grab;
+    if (!strings.includes(g.s)) f.grab = null;
+    else {
+      const c = g.s.closest(p), push = c.d.dot(g.side) + TOUCH;
+      if (push >= RELEASE || c.u < -.03 || c.u > 1.03){
+        const vel = Math.max(.3, Math.min(1, .35 + f.speed * .35 + Math.min(push, RELEASE) / RELEASE * .3));
+        f.grab = null; f.after = g.s; f.afterT = now; pluck(g.s, Math.max(0, Math.min(1, c.u)), vel, now);
+      } else if (push < -.006){ g.s.bend = null; f.grab = null; }
+      else { g.s.bend = { u: Math.max(.04, Math.min(.96, c.u)), vec: c.d.clone().addScaledVector(g.side, TOUCH) }; f.prev.copy(p); return; }
+    }
+  }
+  for (const s of strings){
+    if (s === f.after && now - f.afterT < 120) continue;
+    const c = s.closest(p); if (c.u < -.02 || c.u > 1.02) continue;
+    const cp = s.closest(f.prev);
+    if (c.dist < TOUCH && cp.dist >= TOUCH){ // finger arrives at the string
+      if (f.grab) continue;
+      const side = cp.d.clone().negate().normalize();
+      f.grab = { s, side }; s.bend = { u: Math.max(.04, Math.min(.96, c.u)), vec: c.d.clone().addScaledVector(side, TOUCH) };
+    } else if (c.dist >= TOUCH && cp.dist >= TOUCH && c.d.dot(cp.d) < 0){
+      // fast swipe went straight through between two frames: check how close the path came
+      const mid = f.prev.clone().lerp(p, .5), cm = s.closest(mid);
+      if (Math.min(cm.dist, segDist(f.prev, p, s)) < TOUCH * 2.5) pluck(s, Math.max(0, Math.min(1, cm.u)), Math.max(.4, Math.min(1, .35 + f.speed * .3)), now);
+    }
+  }
+  f.prev.copy(p);
+}
+function segDist(p0, p1, s){ let best = 1e9; for (let i = 0; i <= 8; i++) best = Math.min(best, s.closest(p0.clone().lerp(p1, i / 8)).dist); return best; }
+function releaseFinger(f, now){ if (f.grab){ f.grab.s.bend = null; f.grab = null; } f.prev = null; }
+
+/* ---------- XR inputs: hands and controllers ---------- */
+const JOINTS = ['wrist','thumb-metacarpal','thumb-phalanx-proximal','thumb-phalanx-distal','thumb-tip',
+  'index-finger-metacarpal','index-finger-phalanx-proximal','index-finger-phalanx-intermediate','index-finger-phalanx-distal','index-finger-tip',
+  'middle-finger-metacarpal','middle-finger-phalanx-proximal','middle-finger-phalanx-intermediate','middle-finger-phalanx-distal','middle-finger-tip',
+  'ring-finger-metacarpal','ring-finger-phalanx-proximal','ring-finger-phalanx-intermediate','ring-finger-phalanx-distal','ring-finger-tip',
+  'pinky-finger-metacarpal','pinky-finger-phalanx-proximal','pinky-finger-phalanx-intermediate','pinky-finger-phalanx-distal','pinky-finger-tip'];
+const jointGeo = new THREE.SphereGeometry(1, 10, 8);
+const jointMat = new THREE.MeshBasicMaterial({ color: 0x8cffbe, transparent: true, opacity: .55 });
+const tipMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+const slots = [0, 1].map(i => {
+  const ctrl = renderer.xr.getController(i), grip = renderer.xr.getControllerGrip(i), hand = renderer.xr.getHand(i);
+  scene.add(ctrl, grip, hand);
+  const tip = new THREE.Mesh(new THREE.SphereGeometry(.012, 16, 12), tipMat); tip.position.set(0, -.015, -.06); tip.visible = false; grip.add(tip);
+  const slot = { i, ctrl, grip, hand, tip, source: null, pinching: false, finger: {}, pinchPoint: new THREE.Vector3(), decorated: false };
+  ctrl.addEventListener('connected', e => { slot.source = e.data; tip.visible = !e.data.hand; });
+  ctrl.addEventListener('disconnected', () => { slot.source = null; slot.pinching = false; tip.visible = false; releaseFinger(slot.finger); });
+  ctrl.addEventListener('selectstart', () => { slot.pinching = true; releaseFinger(slot.finger); initAudio(); });
+  ctrl.addEventListener('selectend', () => { slot.pinching = false; });
+  return slot;
+});
+function decorateHand(slot){
+  if (slot.decorated || !slot.hand.joints['index-finger-tip']) return;
+  for (const name of JOINTS){
+    const j = slot.hand.joints[name]; if (!j) return;
+    const tipJoint = name === 'index-finger-tip';
+    const m = new THREE.Mesh(jointGeo, tipJoint ? tipMat : jointMat); m.scale.setScalar(tipJoint ? .009 : .005); j.add(m);
+  }
+  slot.decorated = true;
+}
+const _a = new THREE.Vector3(), _b = new THREE.Vector3();
+function slotFinger(slot){ // fingertip used for plucking, or null
+  if (!slot.source) return null;
+  if (slot.source.hand){ const j = slot.hand.joints['index-finger-tip']; return j && j.visible !== false ? j.getWorldPosition(new THREE.Vector3()) : null; }
+  return slot.tip.getWorldPosition(new THREE.Vector3());
+}
+function slotPinchPoint(slot){
+  if (slot.source?.hand){
+    const t = slot.hand.joints['thumb-tip'], x = slot.hand.joints['index-finger-tip'];
+    if (t && x) return t.getWorldPosition(_a).lerp(x.getWorldPosition(_b), .5).clone();
+  }
+  return slot.tip.getWorldPosition(new THREE.Vector3());
+}
+let activeSlot = null; // the controller currently plucking, for a haptic tick
+function buzz(vel){
+  const h = activeSlot?.source?.gamepad?.hapticActuators?.[0];
+  if (h?.pulse && !activeSlot.source.hand) h.pulse(.3 + vel * .6, 25);
+}
+
+/* ---------- gestures (both hands pinch = new string, one pinch on a string = remove) ---------- */
+const CREATE_HOLD = 350, DELETE_HOLD = 650, GRAB = .03;
+let gesture = null, pending = null, lastCreate = 0;
+const pendingLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
+  new THREE.LineDashedMaterial({ color: 0xffcf5c, dashSize: .02, gapSize: .015, transparent: true, opacity: .9 }));
+pendingLine.visible = false; pendingLine.frustumCulled = false; scene.add(pendingLine);
+const rings = [0, 1].map(() => { const m = new THREE.Mesh(new THREE.RingGeometry(.016, .02, 32, 1, 0, .01), new THREE.MeshBasicMaterial({ color: 0xffcf5c, side: THREE.DoubleSide, transparent: true }));
+  m.visible = false; scene.add(m); return m; });
+function showRing(i, p, progress, color){
+  const m = rings[i]; m.visible = true; m.position.copy(p);
+  m.geometry.dispose(); m.geometry = new THREE.RingGeometry(.016, .02, 32, 1, Math.PI / 2, Math.max(.01, Math.PI * 2 * Math.min(1, progress)));
+  m.material.color.set(color); m.lookAt(renderer.xr.isPresenting ? renderer.xr.getCamera().getWorldPosition(_cp) : camera.position);
+}
+function nearestString(p, maxD){ let best = null, bd = maxD; for (const s of strings){ const c = s.closest(p); if (c.u >= -.02 && c.u <= 1.02 && c.dist < bd){ bd = c.dist; best = s; } } return best; }
+
+function updateGestures(now){
+  const pinching = slots.filter(s => s.source && s.pinching);
+  for (const s of slots) s.pinchPoint = slotPinchPoint(s);
+  rings.forEach(r => r.visible = false);
+  for (const s of strings) s.doomed = 0;
+  if (pinching.length === 2 && now - lastCreate > 900){
+    const a = pinching[0].pinchPoint, b = pinching[1].pinchPoint;
+    if (gesture?.type !== 'create') gesture = { type: 'create', t0: now };
+    if (now - gesture.t0 >= CREATE_HOLD) pending = { a: a.clone(), b: b.clone() };
+    else { showRing(0, a, (now - gesture.t0) / CREATE_HOLD, 0xffcf5c); showRing(1, b, (now - gesture.t0) / CREATE_HOLD, 0xffcf5c); }
+  } else {
+    if (gesture?.type === 'create'){
+      if (pending){ if (addString(pending.a, pending.b)) lastCreate = now; else if (pending.a.distanceTo(pending.b) < MIN_LEN) say('Cancelled.', 900); }
+      gesture = null; pending = null;
+    }
+    if (pinching.length === 1){
+      const sl = pinching[0], p = sl.pinchPoint;
+      if (gesture?.type === 'delete'){
+        if (gesture.slot !== sl || gesture.s.closest(p).dist > GRAB * 2) gesture = null;
+        else { gesture.s.doomed = 1; showRing(0, p, (now - gesture.t0) / DELETE_HOLD, 0xff4a5e);
+          if (now - gesture.t0 >= DELETE_HOLD){ removeString(gesture.s); gesture = { type: 'done', slot: sl }; } }
+      } else if (!gesture){ const s = nearestString(p, GRAB); if (s) gesture = { type: 'delete', slot: sl, s, t0: now }; }
+    } else gesture = null;
+  }
+  pendingLine.visible = !!pending;
+  if (pending){
+    const ok = pending.a.distanceTo(pending.b) >= MIN_LEN;
+    pendingLine.geometry.setFromPoints([pending.a, pending.b]); pendingLine.computeLineDistances();
+    pendingLine.material.color.set(ok ? 0xffcf5c : 0x8a86b0);
+  }
+}
+
+/* ---------- floating instructions inside VR ---------- */
+const panel = (() => {
+  const c = document.createElement('canvas'); c.width = 1024; c.height = 300; const g = c.getContext('2d');
+  g.fillStyle = 'rgba(21,16,56,.85)'; g.beginPath(); g.roundRect(0, 0, 1024, 300, 36); g.fill();
+  g.fillStyle = '#ffcf5c'; g.font = '700 46px Unbounded, Inter, sans-serif'; g.textAlign = 'center'; g.fillText('Lichtsnaren', 512, 72);
+  g.fillStyle = '#eeedff'; g.font = '500 34px Inter, sans-serif';
+  ['Pinch with both hands, hold, pull apart, let go: new string',
+   'Push your index finger through a string to pluck it',
+   'Pinch a string and hold to remove it'].forEach((t, i) => g.fillText(t, 512, 140 + i * 52));
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(.9, .264), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true }));
+  m.position.set(0, 1.85, -1.1); m.visible = false; scene.add(m); return m;
+})();
+let panelHideAt = 0;
+function hidePanelSoon(){ if (panel.visible && !panelHideAt) panelHideAt = performance.now() + 6000; }
+
+/* ---------- desktop preview: the mouse is a fingertip on a plane in front of you ---------- */
+const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), .5); // z = -0.5 m
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+const mouseTip = new THREE.Mesh(new THREE.SphereGeometry(.01, 16, 12), tipMat); mouseTip.visible = false; scene.add(mouseTip);
+const mouse = { finger: {}, down: false, draw: null };
+function planePoint(e){ ndc.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(ndc, camera); return ray.ray.intersectPlane(plane, new THREE.Vector3()); }
+const cvs = renderer.domElement;
+cvs.addEventListener('contextmenu', e => { e.preventDefault(); const p = planePoint(e); const s = p && nearestString(p, .03); if (s) removeString(s); });
+cvs.addEventListener('pointerdown', e => {
+  if (e.button === 2 || renderer.xr.isPresenting) return;
+  initAudio(); cvs.setPointerCapture(e.pointerId); const p = planePoint(e); if (!p) return;
+  if (e.shiftKey || !strings.length){ mouse.draw = { a: p.clone(), b: p.clone() }; pending = mouse.draw; return; }
+  mouse.down = true; mouse.finger.prev = null; fingerStep(mouse.finger, p, performance.now());
+});
+cvs.addEventListener('pointermove', e => {
+  if (renderer.xr.isPresenting) return;
+  const p = planePoint(e); if (!p) return; mouseTip.position.copy(p); mouseTip.visible = true;
+  if (mouse.draw){ mouse.draw.b.copy(p); return; }
+  if (mouse.down) fingerStep(mouse.finger, p, performance.now());
+});
+const endPointer = () => {
+  if (mouse.draw){ addString(mouse.draw.a, mouse.draw.b); mouse.draw = null; pending = null; }
+  const g = mouse.finger.grab;
+  if (g){ const pushed = g.s.bend ? g.s.bend.vec.length() : 0, u = g.s.bend ? g.s.bend.u : .5; releaseFinger(mouse.finger); if (pushed > .008) pluck(g.s, u, .45, performance.now()); }
+  mouse.down = false; releaseFinger(mouse.finger);
+};
+cvs.addEventListener('pointerup', endPointer); cvs.addEventListener('pointercancel', endPointer);
+cvs.addEventListener('pointerleave', () => { mouseTip.visible = false; });
+addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z'){ e.preventDefault(); undo(); }
+  if (e.key === 'Escape'){ mouse.draw = null; pending = null; }
+});
+
+/* ---------- loop ---------- */
+let lastT = performance.now();
+renderer.setAnimationLoop((t) => {
+  const now = performance.now(), dt = Math.min(.05, (now - lastT) / 1000); lastT = now;
+  if (renderer.xr.isPresenting){
+    for (const s of slots){
+      if (!s.source) continue;
+      if (s.source.hand) decorateHand(s);
+      const p = slotFinger(s);
+      if (!p || s.pinching){ releaseFinger(s.finger); continue; }
+      activeSlot = s; fingerStep(s.finger, p, now); activeSlot = null;
+    }
+    updateGestures(now);
+    if (panelHideAt && now > panelHideAt){ panel.visible = false; panelHideAt = 0; }
+  }
+  for (const s of strings) s.update(now);
+  updateSparks(dt);
+  updateListener();
+  renderer.render(scene, camera);
+});
+
+/* ---------- UI ---------- */
+const msg = document.getElementById('msg');
+function say(t, ms){ msg.textContent = t; msg.hidden = !t; clearTimeout(say.t); if (ms) say.t = setTimeout(() => msg.hidden = true, ms); }
+const intro = document.getElementById('intro');
+document.getElementById('url').textContent = location.href.split('#')[0];
+document.getElementById('bUndo').onclick = undo;
+document.getElementById('bClear').onclick = () => strings.slice().forEach(removeString);
+document.getElementById('bExample').onclick = () => { initAudio(); strings.slice().forEach(removeString); example(); strings.forEach((s, i) => setTimeout(() => pluck(s, .5, .4, performance.now()), i * 90)); };
+const start = () => { initAudio(); intro.hidden = true; if (document.getElementById('optExample').checked && !strings.length) example(); };
+document.getElementById('goDesk').onclick = start;
+
+async function enterVR(){
+  start();
+  try {
+    const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor', 'hand-tracking'] });
+    await renderer.xr.setSession(session);
+    panel.visible = true; panelHideAt = strings.length ? performance.now() + 8000 : 0; mouseTip.visible = false;
+    session.addEventListener('end', () => { panel.visible = false; slots.forEach(s => releaseFinger(s.finger)); });
+  } catch (err){ say('Could not start VR: ' + (err.message || err), 5000); }
+}
+(async () => {
+  const ok = navigator.xr && await navigator.xr.isSessionSupported('immersive-vr').catch(() => false);
+  for (const id of ['goVR', 'bVR']){ const b = document.getElementById(id); b.hidden = !ok; b.onclick = enterVR; }
+  document.getElementById('noVR').hidden = !!ok;
+  if (!window.isSecureContext) document.getElementById('noVR').textContent = 'VR needs a secure (https) page. Open the GitHub Pages link in the Meta Quest browser.';
+})();
+</script>
+</html>

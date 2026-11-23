@@ -47,6 +47,7 @@ Lightstrings (in deze repo) liet zien waar een laptopcamera tekortschiet: geen d
 ## Stappenplan
 
 1. **VR-lichtsnaren:** Lightstrings ombouwen naar WebXR met handtracking. Doel: testen of tokkelen in 3D goed voelt op de Quest. Klein en snel te maken.
+   *Status: gebouwd, staat in [`lichtsnaren/`](lichtsnaren/). Nog testen op een echte Quest.*
 2. **Gitaar, vrij spelen:** gitaar in je handen, akkoorden kiezen op de hals, aanslaan met de andere hand.
 3. **Piano, vrij spelen:** keyboard op tafelhoogte, losse vingers, aanslagsterkte.
 4. **Oefenmodus:** eerst voor gitaarakkoorden en pianotoonladders.
