@@ -168,19 +168,51 @@ function pluck(s, u, vel, now){
 }
 const hueFor = (k, steps) => 330 - (k / Math.max(1, steps - 1)) * 250; // low = magenta, high = cyan/green
 
-function crossing(p, q, s){
+function crossing(p, q, s, tol = 0){
   const ax = s.ax * W, ay = s.ay * H, bx = s.bx * W, by = s.by * H;
   const d = (q.x - p.x) * (by - ay) - (q.y - p.y) * (bx - ax);
   if (!d) return null;
   const t = ((ax - p.x) * (by - ay) - (ay - p.y) * (bx - ax)) / d;
   const u = ((ax - p.x) * (q.y - p.y) - (ay - p.y) * (q.x - p.x)) / d;
-  return (t >= 0 && t <= 1 && u >= 0 && u <= 1) ? u : null;
+  return (t >= 0 && t <= 1 && u >= -tol && u <= 1 + tol) ? Math.max(0, Math.min(1, u)) : null;
 }
-function sweep(p, q, now, minDist = .5){
+// A "finger" pushes a string sideways when it reaches it; the string bends with it and
+// sounds when pushed far enough (or when the finger slides off its end or lets go).
+// Moving back without pushing far un-bends it silently, like easing off a real string.
+function lineInfo(pt, s){
+  const ax = s.ax * W, ay = s.ay * H, bx = s.bx * W, by = s.by * H, dx = bx - ax, dy = by - ay;
+  const len = Math.hypot(dx, dy) || 1;
+  return { d: (dx * (pt.y - ay) - dy * (pt.x - ax)) / len, u: ((pt.x - ax) * dx + (pt.y - ay) * dy) / (len * len), len };
+}
+const releaseDist = (len, hand) => Math.max(16, Math.min(34, len * .045)) * (hand ? 1.25 : 1);
+function letGo(f, now, sound){
+  const g = f.grab; if (!g) return; f.grab = null; g.s.bend = null;
+  if (sound && strings.includes(g.s)) pluck(g.s, g.u, Math.max(.3, Math.min(1, .35 + g.push / g.rel * .35 + (f.speed || 0) * .35)), now);
+}
+function fingerMove(f, p, q, now, hand){
+  const dt = Math.max(4, now - (f.t || now - 16)); f.t = now;
+  f.speed = Math.hypot(q.x - p.x, q.y - p.y) / dt; // px per ms
+  if (f.grab){
+    const g = f.grab;
+    if (!strings.includes(g.s)){ f.grab = null; }
+    else {
+      const { d, u, len } = lineInfo(q, g.s), push = d * g.side; g.rel = releaseDist(len, hand);
+      g.u = Math.max(.04, Math.min(.96, u)); g.push = Math.max(0, push);
+      if (push >= g.rel || u < -.03 || u > 1.03){ letGo(f, now, true); f.after = g.s; f.afterT = now; return; }
+      if (push < -2){ g.s.bend = null; f.grab = null; } // eased back off the string
+      else { g.s.bend = { u: g.u, off: d }; return; }
+    }
+  }
   const dist = Math.hypot(q.x - p.x, q.y - p.y);
-  if (dist < minDist || dist > Math.max(W, H) * .45) return;
-  const vel = Math.max(.15, Math.min(1, dist / 45));
-  for (const s of strings){ const u = crossing(p, q, s); if (u !== null) pluck(s, u, vel, now); }
+  if (dist < (hand ? 1.5 : .5) || dist > Math.max(W, H) * .45) return;
+  for (const s of strings){
+    if (s === f.after && now - f.afterT < 50) continue;
+    const u = crossing(p, q, s, hand ? .04 : 0); if (u === null) continue;
+    const { d, len } = lineInfo(q, s), side = Math.sign(dist && (d || 1)), rel = releaseDist(len, hand);
+    if (Math.abs(d) >= rel || f.grab){ // fast swipe straight through: pluck right away
+      const v = Math.max(.3, Math.min(1, .35 + f.speed * .45)); s.bend = null; pluck(s, u, v, now);
+    } else { f.grab = { s, side, u: Math.max(.04, Math.min(.96, u)), push: Math.abs(d), rel }; s.bend = { u: f.grab.u, off: d }; }
+  }
 }
 
 /* ---------- sparks ---------- */
@@ -249,11 +281,12 @@ cv.addEventListener('pointermove', e => {
   if (pending && pending.id === e.pointerId){ pending.b = pt; return; }
   if (press && press.id === e.pointerId && Math.hypot(pt.x - press.x, pt.y - press.y) > 12) press = null;
   const prev = ptrs.get(e.pointerId);
-  if (prev){ sweep(prev, pt, performance.now()); prev.x = pt.x; prev.y = pt.y; trail.push({ x: pt.x, y: pt.y, life: 1 }); }
+  if (prev){ fingerMove(prev, { x: prev.x, y: prev.y }, pt, performance.now(), false); prev.x = pt.x; prev.y = pt.y; trail.push({ x: pt.x, y: pt.y, life: 1 }); }
 });
 function endPtr(e){
   if (pending && pending.id === e.pointerId){ addString(pending.a, pending.b); pending = null; }
   if (press && press.id === e.pointerId) press = null;
+  const f = ptrs.get(e.pointerId); if (f?.grab) letGo(f, performance.now(), f.grab.push > 5);
   ptrs.delete(e.pointerId);
 }
 cv.addEventListener('pointerup', endPtr); cv.addEventListener('pointercancel', endPtr);
@@ -422,21 +455,23 @@ function onDetections(landmarks, now){
     h.raw = raw;
     h.pts = raw.map((p, i) => ({ x: h.filt[i][0](p.x, now), y: h.filt[i][1](p.y, now) }));
     h.vel = prev && dt && !h.lost ? h.pts.map((p, i) => ({ x: (p.x - prev[i].x) / dt, y: (p.y - prev[i].y) / dt })) : h.pts.map(() => ({ x: 0, y: 0 }));
-    if (h.lost) h.prevTips = null; // don't sweep across the gap
+    if (h.lost){ h.prevTips = null; if (h.finger) letGo(h.finger, now, false); } // don't pluck across the gap
     h.tDet = now; h.lost = 0;
     const P = h.pts; h.palm = Math.hypot(P[0].x - P[9].x, P[0].y - P[9].y) || 1;
     const r = Math.hypot(P[4].x - P[8].x, P[4].y - P[8].y) / h.palm;
     h.pinch = h.pinch ? r < PINCH_OFF : r < PINCH_ON;
     next.push(h);
   }
-  for (const h of free){ if (!h.lost) h.lost = now; if (now - h.lost < LOST_GRACE) next.push(h); }
+  for (const h of free){ if (!h.lost){ h.lost = now; if (h.finger?.grab) letGo(h.finger, now, false); } if (now - h.lost < LOST_GRACE) next.push(h); }
   hands = next;
   const live = hands.filter(h => !h.lost);
 
   // plucking: the index fingertip of an open hand sweeps through strings
   for (const h of live){
     const tips = PLUCK_TIPS.map(t => ({ x: h.pts[t].x, y: h.pts[t].y }));
-    if (h.prevTips && !h.pinch) tips.forEach((c, i) => sweep(h.prevTips[i], c, now, 4));
+    h.finger = h.finger || {};
+    if (h.pinch){ if (h.finger.grab) letGo(h.finger, now, h.finger.grab.push > 6); }
+    else if (h.prevTips) fingerMove(h.finger, h.prevTips[0], tips[0], now, true);
     h.prevTips = tips;
   }
 
@@ -513,14 +548,16 @@ function frame(now){
     ctx.beginPath();
     for (let i = 0; i <= SEG; i++){
       const u = i / SEG, shape = u < s.pos ? u / s.pos : (1 - u) / (1 - s.pos);
-      const off = A * maxD * (shape * Math.cos(ph) + .25 * Math.sin(Math.PI * 2 * u) * Math.cos(ph * 2.01));
+      let off = A * maxD * (shape * Math.cos(ph) + .25 * Math.sin(Math.PI * 2 * u) * Math.cos(ph * 2.01));
+      if (s.bend){ const bu = s.bend.u; off = (u < bu ? u / bu : (1 - u) / (1 - bu)) * s.bend.off; }
       const x = ax + (bx - ax) * u + nx * off, y = ay + (by - ay) * u + ny * off;
       i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
     }
     const doomed = (gesture?.type === 'delete' && gesture.s === s) || (press?.s === s);
     if (doomed){ const pr = gesture?.type === 'delete' ? (now - gesture.t0) / DELETE_HOLD : (now - press.t) / 650;
       ctx.strokeStyle = `rgba(255,70,90,${.35 + pr * .5})`; ctx.lineWidth = 14; ctx.lineCap = 'round'; ctx.stroke(); }
-    ctx.strokeStyle = `hsla(${hue},100%,62%,${.10 + A * .35})`; ctx.lineWidth = 9 + A * 10; ctx.lineCap = 'round'; ctx.stroke();
+    const tension = s.bend ? Math.min(1, Math.abs(s.bend.off) / 30) : 0;
+    ctx.strokeStyle = `hsla(${hue},100%,62%,${.10 + A * .35 + tension * .3})`; ctx.lineWidth = 9 + A * 10 + tension * 6; ctx.lineCap = 'round'; ctx.stroke();
     ctx.strokeStyle = `hsla(${hue},100%,${70 + A * 20}%,${.75 + A * .25})`; ctx.lineWidth = 1.6 + A * 1.6; ctx.stroke();
     for (const [px, py] of [[ax, ay], [bx, by]]){
       ctx.beginPath(); ctx.arc(px, py, 3.2, 0, Math.PI * 2); ctx.fillStyle = `hsla(${hue},100%,80%,.9)`; ctx.fill();
@@ -583,10 +620,10 @@ requestAnimationFrame(frame);
 const hint = document.getElementById('hint');
 function updateHint(){
   hint.innerHTML = camOn
-    ? '<b>Swipe your index finger</b> to pluck. <b>Pinch a string and hold</b> to remove it. <b>Pinch with both hands, hold</b>, pull apart and let go to add one; bring them together to cancel.'
+    ? '<b>Push your index finger through</b> a string to pluck; ease back to let it go quietly. <b>Pinch a string and hold</b> to remove it. <b>Pinch with both hands, hold</b>, pull apart and let go to add one; bring them together to cancel.'
     : (drawMode
       ? '<b>Drag</b> to stretch a new string. Longer strings play lower notes.'
-      : '<b>Drag across</b> a string to pluck it. Hold <b>Shift</b> or tap <b>Draw string</b> to add your own. <b>Right-click</b> or long-press a string to remove it. <b>Ctrl+Z</b> undoes.');
+      : '<b>Drag through</b> a string to pluck it; it bends first, like a real string. Hold <b>Shift</b> or tap <b>Draw string</b> to add your own. <b>Right-click</b> or long-press a string to remove it. <b>Ctrl+Z</b> undoes.');
 }
 updateHint();
 bDraw.onclick = () => { drawMode = !drawMode; bDraw.setAttribute('aria-pressed', String(drawMode)); updateHint(); };

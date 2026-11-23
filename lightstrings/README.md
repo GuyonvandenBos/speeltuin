@@ -23,7 +23,8 @@ Hand tracking runs fully in the browser with [MediaPipe Hand Landmarker](https:/
 
 | Gesture | Action |
 | --- | --- |
-| Swipe your index finger through a string | Pluck it (faster = louder) |
+| Push your index finger through a string | It bends with your finger, then sounds when pushed far enough (faster = louder) |
+| Ease your finger back before it sounds | Let the string go quietly |
 | Pinch a string with one hand and hold | Remove it |
 | Pinch with both hands, hold, pull apart, let go | Add a string between your hands |
 | Bring both pinches back together, let go | Cancel the new string |
@@ -33,7 +34,7 @@ Hand tracking runs fully in the browser with [MediaPipe Hand Landmarker](https:/
 | Input | Action |
 | --- | --- |
 | Drag on an empty board | Stretch your first string |
-| Drag / swipe across a string | Pluck it (faster = louder) |
+| Drag through a string | Bend it and pluck it (faster = louder) |
 | Shift + drag, or **Draw string** | Stretch a new string |
 | Right-click, or long-press on touch | Remove a string |
 | **Undo** or Ctrl+Z | Undo the last add or remove |
@@ -45,6 +46,7 @@ Hand tracking runs fully in the browser with [MediaPipe Hand Landmarker](https:/
 ## How it works
 
 - Sound: Karplus–Strong plucked-string synthesis with the Web Audio API, plus a generated reverb. No audio files.
+- Strings bend with your finger and only sound once pushed past a release point, like a real string; a fast swipe plucks straight away.
 - Pitch follows string length and the chosen scale, across three octaves from A2.
 - Hand tracking runs in a Web Worker so it never stalls drawing. It times the GPU and CPU paths on your machine and keeps the faster one.
 - Between camera frames, hands are drawn slightly ahead along their motion, and a hand that drops out for a frame or two is kept briefly instead of vanishing.
