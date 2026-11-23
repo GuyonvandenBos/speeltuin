@@ -46,6 +46,9 @@ Hand tracking runs fully in the browser with [MediaPipe Hand Landmarker](https:/
 
 - Sound: Karplus–Strong plucked-string synthesis with the Web Audio API, plus a generated reverb. No audio files.
 - Pitch follows string length and the chosen scale, across three octaves from A2.
+- Hand tracking runs in a Web Worker so it never stalls drawing. It times the GPU and CPU paths on your machine and keeps the faster one.
+- Between camera frames, hands are drawn slightly ahead along their motion, and a hand that drops out for a frame or two is kept briefly instead of vanishing.
+- A webcam can't see depth; the fingertip marker grows as your hand comes closer, using hand size as a rough distance cue.
 - Hand points are smoothed with a One Euro filter, and pinches use hysteresis so a relaxed hand doesn't count as a pinch.
 - Everything is one self-contained HTML file; libraries load from jsDelivr only when webcam mode starts.
 
