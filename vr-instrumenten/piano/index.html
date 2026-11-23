@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Piano VR</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Inter:wght@400;500;600&display=swap">
+<style>
+/* Layout: full-bleed 3D view; a slim top bar, a key-map hint at the bottom for the browser preview, and a start card until play begins. Single dark look by choice. */
+:root{
+  --bg:#07061a; --bg2:#151038; --fg:#eeedff; --dim:#a39fd2; --line:#332c70; --accent:#ffcf5c; --accent-ink:#1c1400;
+  --font-d:"Unbounded",system-ui,sans-serif; --font-b:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
+  color-scheme:dark;
+}
+html,body{height:100%;margin:0}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--fg);font-family:var(--font-b);overflow:hidden}
+canvas{display:block;touch-action:none}
+.bar{position:fixed;top:0;left:0;right:0;z-index:5;display:flex;flex-wrap:wrap;gap:8px;align-items:center;
+  padding-top:calc(env(safe-area-inset-top,0px) + 12px);padding-bottom:20px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  background:linear-gradient(var(--bg) 35%,transparent);pointer-events:none;user-select:none}
+.bar>*{pointer-events:auto}
+.brand{font:700 16px/1 var(--font-d);margin-right:auto;pointer-events:none}
+.brand span{color:var(--accent)}
+.status{color:var(--dim);font-size:12px;pointer-events:none}
+button{font:500 13px/1 var(--font-b);color:var(--fg);background:rgba(255,255,255,.06);border:1px solid var(--line);border-radius:999px;padding:8px 14px;cursor:pointer}
+button:hover{background:rgba(255,255,255,.12)}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.hint{position:fixed;left:0;right:0;bottom:0;z-index:5;text-align:center;color:var(--dim);font-size:13px;line-height:1.5;
+  padding-bottom:calc(env(safe-area-inset-bottom,0px) + 14px);padding-top:24px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  background:linear-gradient(transparent,var(--bg) 70%);pointer-events:none;text-wrap:balance}
+.hint b{color:var(--fg);font-weight:600}
+.hint kbd{font:600 12px var(--font-b);color:var(--fg);border:1px solid var(--line);border-radius:5px;padding:1px 5px}
+.intro{position:fixed;inset:0;z-index:10;display:grid;place-items:center;background:rgba(7,6,26,.8);backdrop-filter:blur(3px);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.card{max-width:500px;text-align:center;display:grid;gap:14px}
+.card h1{font:700 clamp(28px,7vw,44px)/1.05 var(--font-d);margin:0}
+.card h1 span{color:var(--accent)}
+.card p{margin:0;color:var(--dim);font-size:15px;line-height:1.55}
+.card .go{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:4px}
+.card .go button{font-size:15px;padding:12px 20px}
+.card label{color:var(--dim);font-size:14px;display:inline-flex;gap:8px;align-items:center;justify-content:center;cursor:pointer}
+.card small{color:var(--dim);font-size:12px;line-height:1.5}
+.card small a{color:var(--dim)}
+.card code{color:var(--fg);font-size:12px;word-break:break-all}
+#msg{position:fixed;left:50%;top:40%;transform:translate(-50%,-50%);z-index:11;max-width:min(420px,calc(100% - 32px));
+  background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:16px 18px;font-size:14px;line-height:1.5;text-align:center}
+@media (max-width:520px){.brand{width:100%}}
+</style>
+
+<div class="bar">
+  <div class="brand">Piano <span>VR</span></div>
+  <span class="status" id="status">Loading piano sound…</span>
+  <button id="bSustain" aria-pressed="false" title="Sustain pedal (Space)">Sustain</button>
+  <button id="bVR" hidden>Enter VR</button>
+</div>
+<div class="hint" id="hint"><b>Click or drag</b> across the keys, or play with your keyboard: <kbd>Z</kbd>–<kbd>M</kbd> and <kbd>S</kbd> <kbd>D</kbd> <kbd>G</kbd> <kbd>H</kbd> <kbd>J</kbd> for the low octave, <kbd>Q</kbd>–<kbd>I</kbd> and <kbd>2</kbd> <kbd>3</kbd> <kbd>5</kbd> <kbd>6</kbd> <kbd>7</kbd> for the middle. <kbd>Space</kbd> holds the sustain.</div>
+<div id="msg" hidden></div>
+
+<div class="intro" id="intro">
+  <div class="card">
+    <h1>Piano <span>VR</span></h1>
+    <p>A three-octave keyboard of light at table height. Play it with all ten fingers; how hard you strike sets how loud it sounds.</p>
+    <label><input type="checkbox" id="optBig"> Big keys (easier with hand tracking)</label>
+    <div class="go">
+      <button class="primary" id="goVR" hidden>Enter VR</button>
+      <button id="goDesk">Try it in the browser</button>
+    </div>
+    <small id="noVR" hidden>No VR headset found. To play in VR, open this page in the Meta Quest browser:<br><code id="url"></code></small>
+    <small>Piano sound: <a href="https://archive.org/details/SalamanderGrandPianoV3" target="_blank" rel="noopener">Salamander Grand Piano</a> by Alexander Holm, CC-BY 3.0.</small>
+  </div>
+</div>
+
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }</script>
+<script type="module">
+import * as THREE from 'three';
+
+/* ---------- renderer, scene, camera ---------- */
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local-floor');
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x07061a);
+scene.fog = new THREE.FogExp2(0x07061a, .12);
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, .01, 60);
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); fitDesktop(); });
+{
+  const dots = [], stars = [];
+  for (let x = -6; x <= 6; x += .4) for (let z = -6; z <= 6; z += .4) if (x * x + z * z < 36) dots.push(x, 0, z);
+  for (let i = 0; i < 900; i++){ const v = new THREE.Vector3().randomDirection().multiplyScalar(18 + Math.random() * 12); stars.push(v.x, Math.abs(v.y) + 1, v.z); }
+  const mk = (arr, size, color, op) => { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3));
+    return new THREE.Points(g, new THREE.PointsMaterial({ size, color, transparent: true, opacity: op, depthWrite: false })); };
+  scene.add(mk(dots, .02, 0x6a5fd0, .55), mk(stars, .09, 0xc9c4ff, .8));
+}
+
+/* ---------- sound: Salamander Grand Piano samples, synth until they load ---------- */
+const LOW = 48, HIGH = 84; // C3 .. C6
+const SAMPLE_URL = 'https://tonejs.github.io/audio/salamander/';
+const SAMPLE_NOTES = []; for (let m = LOW; m <= HIGH; m += 3) SAMPLE_NOTES.push(m); // every minor third, from C3
+const NAMES = ['C', 'Cs', 'D', 'Ds', 'E', 'F', 'Fs', 'G', 'Gs', 'A', 'As', 'B'];
+const fileFor = m => NAMES[m % 12] + (Math.floor(m / 12) - 1) + '.mp3';
+let ac = null, out = null, sustain = false; const samples = new Map(), voices = new Map();
+const status = document.getElementById('status');
+function initAudio(){
+  if (ac){ ac.resume(); return; }
+  ac = new (window.AudioContext || window.webkitAudioContext)();
+  const comp = ac.createDynamicsCompressor(); comp.threshold.value = -12; comp.ratio.value = 3;
+  out = ac.createGain(); out.gain.value = .9;
+  const rev = ac.createConvolver(), wet = ac.createGain(); wet.gain.value = .18;
+  const sr = ac.sampleRate, len = Math.floor(sr * 2.2), ib = ac.createBuffer(2, len, sr);
+  for (let c = 0; c < 2; c++){ const d = ib.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3); }
+  rev.buffer = ib; out.connect(comp); out.connect(rev); rev.connect(wet); wet.connect(comp); comp.connect(ac.destination);
+  loadSamples();
+}
+async function loadSamples(){
+  let done = 0;
+  await Promise.all(SAMPLE_NOTES.map(async m => {
+    try { const r = await fetch(SAMPLE_URL + fileFor(m)); if (!r.ok) throw 0; samples.set(m, await ac.decodeAudioData(await r.arrayBuffer())); } catch {}
+    done++; status.textContent = `Loading piano sound… ${done}/${SAMPLE_NOTES.length}`;
+  }));
+  status.textContent = samples.size ? '' : 'Piano samples unavailable; using a simple synth';
+}
+const freq = m => 440 * Math.pow(2, (m - 69) / 12);
+function noteOn(m, vel, where){
+  if (!ac) return; noteOff(m, true);
+  const t = ac.currentTime, g = ac.createGain(), lp = ac.createBiquadFilter();
+  lp.type = 'lowpass'; lp.frequency.value = 1200 + vel * vel * 9000;
+  const p = ac.createPanner(); p.panningModel = 'HRTF'; p.refDistance = .6; p.rolloffFactor = .4;
+  if (p.positionX){ p.positionX.value = where.x; p.positionY.value = where.y; p.positionZ.value = where.z; } else p.setPosition(where.x, where.y, where.z);
+  g.connect(lp); lp.connect(p); p.connect(out);
+  let srcs = [];
+  let near = null, bd = 99; for (const k of samples.keys()){ const d = Math.abs(k - m); if (d < bd){ bd = d; near = k; } }
+  if (near !== null){
+    const s = ac.createBufferSource(); s.buffer = samples.get(near); s.playbackRate.value = Math.pow(2, (m - near) / 12);
+    s.connect(g); s.start(t); srcs.push(s); g.gain.setValueAtTime(.15 + vel * .85, t);
+  } else { // fallback: a few slightly inharmonic partials with a fast attack and long decay
+    [[1, 1], [2, .5], [3, .25], [4, .12], [5.02, .06]].forEach(([h, a]) => {
+      const o = ac.createOscillator(); o.frequency.value = freq(m) * h * (1 + .0004 * h * h); const og = ac.createGain();
+      og.gain.setValueAtTime(a, t); og.gain.exponentialRampToValueAtTime(.0005, t + 3.5 / h); o.connect(og); og.connect(g); o.start(t); o.stop(t + 4); srcs.push(o);
+    });
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(.12 + vel * .3, t + .005); g.gain.exponentialRampToValueAtTime(.001, t + 4);
+  }
+  voices.set(m, { g, srcs, held: true });
+}
+function noteOff(m, now){
+  const v = voices.get(m); if (!v) return;
+  v.held = false;
+  if (sustain && !now) return; // the damper stays up while sustain is on
+  const t = ac.currentTime; v.g.gain.cancelScheduledValues(t); v.g.gain.setTargetAtTime(0, t, now ? .02 : .09);
+  v.srcs.forEach(s => s.stop(t + .6)); voices.delete(m);
+}
+function setSustain(on){
+  sustain = on; document.getElementById('bSustain').setAttribute('aria-pressed', String(on)); drawSustain();
+  if (!on) for (const [m, v] of [...voices]) if (!v.held) noteOff(m);
+}
+const _cp = new THREE.Vector3(), _q = new THREE.Quaternion(), _fw = new THREE.Vector3(), _up = new THREE.Vector3();
+function updateListener(){
+  if (!ac) return;
+  const cam = renderer.xr.isPresenting ? renderer.xr.getCamera() : camera;
+  cam.getWorldPosition(_cp); cam.getWorldQuaternion(_q); _fw.set(0, 0, -1).applyQuaternion(_q); _up.set(0, 1, 0).applyQuaternion(_q);
+  const L = ac.listener;
+  if (L.positionX){ L.positionX.value = _cp.x; L.positionY.value = _cp.y; L.positionZ.value = _cp.z;
+    L.forwardX.value = _fw.x; L.forwardY.value = _fw.y; L.forwardZ.value = _fw.z; L.upX.value = _up.x; L.upY.value = _up.y; L.upZ.value = _up.z; }
+  else { L.setPosition(_cp.x, _cp.y, _cp.z); L.setOrientation(_fw.x, _fw.y, _fw.z, _up.x, _up.y, _up.z); }
+}
+
+/* ---------- the keyboard (its own space: x along the keys, y up, z toward the player; key tops at y = 0) ---------- */
+const piano = new THREE.Group(); scene.add(piano);
+const isBlack = m => [1, 3, 6, 8, 10].includes(m % 12);
+const WK = { w: .0235, l: .15, h: .022 }, BK = { w: .0137, l: .095, h: .012, up: .011 };
+const PRESS = .010;                 // a key travels 1 cm
+const TIP_R = .0075;                // fingertip pad radius
+let keys = [], keyScale = 1, caseGroup = null;
+const ACCENT = new THREE.Color(0xffcf5c), NEON = new THREE.Color(0xb9adff);
+const hueOf = m => new THREE.Color().setHSL((330 - (m - LOW) / (HIGH - LOW) * 250) / 360, 1, .62);
+function buildKeyboard(scale){
+  keyScale = scale; piano.clear(); keys = [];
+  const whites = []; for (let m = LOW; m <= HIGH; m++) if (!isBlack(m)) whites.push(m);
+  const W = WK.w * scale, total = whites.length * W, x0 = -total / 2;
+  const whiteMat = () => new THREE.MeshBasicMaterial({ color: 0xcfc9f5 }), blackMat = () => new THREE.MeshBasicMaterial({ color: 0x15113a });
+  const wGeo = new THREE.BoxGeometry(W - .0012, WK.h, WK.l * Math.min(1.15, scale)), bGeo = new THREE.BoxGeometry(BK.w * scale, BK.h, BK.l * Math.min(1.15, scale));
+  const wEdge = new THREE.EdgesGeometry(wGeo), bEdge = new THREE.EdgesGeometry(bGeo);
+  const L = WK.l * Math.min(1.15, scale), BL = BK.l * Math.min(1.15, scale);
+  let wi = 0;
+  for (let m = LOW; m <= HIGH; m++){
+    const black = isBlack(m), k = { m, black, depth: 0, fingers: 0, glow: 0 };
+    if (!black){ k.x = x0 + W * (wi + .5); wi++; k.w = W; k.z0 = -L / 2; k.z1 = L / 2; k.top = 0; }
+    else { k.x = x0 + W * wi; k.w = BK.w * scale; k.z0 = -L / 2; k.z1 = -L / 2 + BL; k.top = BK.up; }
+    const mesh = new THREE.Mesh(black ? bGeo : wGeo, black ? blackMat() : whiteMat());
+    const edge = new THREE.LineSegments(black ? bEdge : wEdge, new THREE.LineBasicMaterial({ color: black ? NEON : 0x6f66b8, transparent: true, opacity: black ? .9 : .7 }));
+    const glow = new THREE.Mesh(black ? bGeo : wGeo, new THREE.MeshBasicMaterial({ color: hueOf(m), transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
+    glow.scale.set(1.08, 1.3, 1.02);
+    k.obj = new THREE.Group(); k.obj.add(mesh, edge, glow); k.mesh = mesh; k.glowMesh = glow;
+    k.base = mesh.material.color.clone(); k.hue = hueOf(m);
+    k.obj.position.set(k.x, k.top - (black ? BK.h : WK.h) / 2, (k.z0 + k.z1) / 2);
+    k.restY = k.obj.position.y; piano.add(k.obj); keys.push(k);
+    if (m % 12 === 0){ // octave labels on the C keys
+      const cv = document.createElement('canvas'); cv.width = 64; cv.height = 64; const g = cv.getContext('2d');
+      g.fillStyle = '#4a4290'; g.font = '700 30px Inter, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('C' + (m / 12 - 1), 32, 34);
+      const lab = new THREE.Mesh(new THREE.PlaneGeometry(W * .8, W * .8), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(cv), transparent: true, depthWrite: false }));
+      lab.rotation.x = -Math.PI / 2; lab.position.set(0, WK.h / 2 + .0004, L / 2 - W * .6); k.obj.add(lab);
+    }
+  }
+  // case: a back rail with the sustain button, and side cheeks
+  caseGroup = new THREE.Group();
+  const rail = new THREE.Mesh(new THREE.BoxGeometry(total + .05, .05, .06), new THREE.MeshBasicMaterial({ color: 0x110d2e }));
+  rail.position.set(0, .012, -L / 2 - .03);
+  const railEdge = new THREE.LineSegments(new THREE.EdgesGeometry(rail.geometry), new THREE.LineBasicMaterial({ color: NEON })); railEdge.position.copy(rail.position);
+  const cheekG = new THREE.BoxGeometry(.025, .04, L + .06);
+  for (const s of [-1, 1]){ const c = new THREE.Mesh(cheekG, new THREE.MeshBasicMaterial({ color: 0x110d2e })); c.position.set(s * (total / 2 + .0125), -.005, -.03 + .03);
+    const ce = new THREE.LineSegments(new THREE.EdgesGeometry(cheekG), new THREE.LineBasicMaterial({ color: NEON })); ce.position.copy(c.position); caseGroup.add(c, ce); }
+  const under = new THREE.Mesh(new THREE.BoxGeometry(total + .05, .012, L + .06), new THREE.MeshBasicMaterial({ color: 0x0b0922 })); under.position.set(0, -WK.h - .008, 0);
+  caseGroup.add(rail, railEdge, under); piano.add(caseGroup);
+  // sustain button on the left of the rail, pressed with a fingertip
+  sustainBtn.position.set(-total / 2 + .05, .038, -L / 2 - .03); piano.add(sustainBtn);
+  piano.userData = { total, L };
+  drawSustain();
+}
+const sustainCanvas = document.createElement('canvas'); sustainCanvas.width = 256; sustainCanvas.height = 96;
+const sustainTex = new THREE.CanvasTexture(sustainCanvas);
+const sustainBtn = new THREE.Mesh(new THREE.BoxGeometry(.08, .012, .03), [null, null, new THREE.MeshBasicMaterial({ map: sustainTex }), null, null, null].map(m => m || new THREE.MeshBasicMaterial({ color: 0x2b2370 })));
+function drawSustain(){
+  const g = sustainCanvas.getContext('2d'); g.clearRect(0, 0, 256, 96);
+  g.fillStyle = sustain ? '#ffcf5c' : '#2b2370'; g.fillRect(0, 0, 256, 96);
+  g.fillStyle = sustain ? '#1c1400' : '#eeedff'; g.font = '700 40px Inter, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(sustain ? 'Sustain on' : 'Sustain', 128, 50); sustainTex.needsUpdate = true;
+}
+buildKeyboard(1);
+
+function keyAt(p){ // key under a point in keyboard space; black keys sit on top, so check them first
+  for (const k of keys) if (k.black && Math.abs(p.x - k.x) < k.w / 2 && p.z > k.z0 && p.z < k.z1) return k;
+  for (const k of keys) if (!k.black && Math.abs(p.x - k.x) < k.w / 2 && p.z > k.z0 && p.z < k.z1) return k;
+  return null;
+}
+function press(k, vel){
+  k.fingers++; if (k.fingers > 1) return;
+  noteOn(k.m, vel, piano.localToWorld(new THREE.Vector3(k.x, 0, 0))); k.glow = 1; buzz(vel);
+}
+function release(k){ k.fingers = Math.max(0, k.fingers - 1); if (!k.fingers) noteOff(k.m); }
+
+/* ---------- fingers: a fingertip pushing into a key presses it; velocity from how fast it came down ---------- */
+function fingerStep(f, p, now){
+  const dt = f.t ? Math.max(4, now - f.t) / 1000 : .016; f.t = now;
+  const vy = f.prevY !== undefined ? (f.prevY - p.y) / dt : 0; f.prevY = p.y; // downward speed, m/s
+  f.vy = f.vy === undefined ? vy : f.vy * .5 + vy * .5;
+  const k = keyAt(p);
+  if (f.key && f.key !== k){ f.key.depth = 0; release(f.key); f.key = null; } // slid off: glissando onto the next key
+  if (!k){ return; }
+  const pad = p.y - TIP_R, depth = k.top - pad; // how far the fingertip is pushed into the key top
+  if (depth > PRESS * 3.5){ if (f.key){ release(f.key); f.key = null; } return; } // hand is under or behind the keyboard
+  if (!f.key && depth > .003 && (f.wasAbove || f.vy > .05)){
+    f.key = k; press(k, Math.max(.12, Math.min(1, f.vy / .7)));
+  } else if (f.key && depth < .001){ release(f.key); f.key.depth = 0; f.key = null; }
+  if (f.key) f.key.depth = Math.max(f.key.depth, Math.min(PRESS, depth));
+  f.wasAbove = depth < 0;
+}
+function releaseFinger(f){ if (f.key){ f.key.depth = 0; release(f.key); f.key = null; } f.prevY = undefined; f.wasAbove = false; }
+
+/* ---------- XR inputs ---------- */
+const JOINT_NAMES = ['wrist','thumb-metacarpal','thumb-phalanx-proximal','thumb-phalanx-distal','thumb-tip',
+  'index-finger-metacarpal','index-finger-phalanx-proximal','index-finger-phalanx-intermediate','index-finger-phalanx-distal','index-finger-tip',
+  'middle-finger-metacarpal','middle-finger-phalanx-proximal','middle-finger-phalanx-intermediate','middle-finger-phalanx-distal','middle-finger-tip',
+  'ring-finger-metacarpal','ring-finger-phalanx-proximal','ring-finger-phalanx-intermediate','ring-finger-phalanx-distal','ring-finger-tip',
+  'pinky-finger-metacarpal','pinky-finger-phalanx-proximal','pinky-finger-phalanx-intermediate','pinky-finger-phalanx-distal','pinky-finger-tip'];
+const TIPS = ['thumb-tip', 'index-finger-tip', 'middle-finger-tip', 'ring-finger-tip', 'pinky-finger-tip'];
+const jointGeo = new THREE.SphereGeometry(1, 10, 8);
+const jointMat = new THREE.MeshBasicMaterial({ color: 0x8cffbe, transparent: true, opacity: .5 }), tipMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+const slots = [0, 1].map(i => {
+  const ctrl = renderer.xr.getController(i), grip = renderer.xr.getControllerGrip(i), hand = renderer.xr.getHand(i);
+  scene.add(ctrl, grip, hand);
+  const tip = new THREE.Mesh(new THREE.SphereGeometry(.01, 16, 12), tipMat); tip.position.set(0, -.015, -.06); tip.visible = false; grip.add(tip);
+  const slot = { ctrl, grip, hand, tip, source: null, pinching: false, fingers: TIPS.map(() => ({})), decorated: false };
+  ctrl.addEventListener('connected', e => { slot.source = e.data; tip.visible = !e.data.hand; });
+  ctrl.addEventListener('disconnected', () => { slot.source = null; slot.pinching = false; tip.visible = false; slot.fingers.forEach(releaseFinger); });
+  ctrl.addEventListener('selectstart', () => { slot.pinching = true; initAudio(); });
+  ctrl.addEventListener('selectend', () => { slot.pinching = false; });
+  return slot;
+});
+function decorateHand(slot){
+  if (slot.decorated || !slot.hand.joints['index-finger-tip']) return;
+  for (const n of JOINT_NAMES){ const j = slot.hand.joints[n]; if (!j) return; const t = TIPS.includes(n);
+    const m = new THREE.Mesh(jointGeo, t ? tipMat : jointMat); m.scale.setScalar(t ? .0065 : .0045); j.add(m); }
+  slot.decorated = true;
+}
+const jointWorld = (slot, n) => { const j = slot.hand.joints[n]; return j && j.visible !== false ? j.getWorldPosition(new THREE.Vector3()) : null; };
+let activeSlot = null;
+function buzz(vel){ const h = activeSlot?.source?.gamepad?.hapticActuators?.[0]; if (h?.pulse && !activeSlot.source.hand) h.pulse(.2 + vel * .5, 20); }
+
+// sustain button: a fingertip pushing down on it toggles sustain
+let sustainLatch = false;
+function checkSustain(tipLocal){
+  const b = sustainBtn.position;
+  return Math.abs(tipLocal.x - b.x) < .04 && Math.abs(tipLocal.z - b.z) < .02 && tipLocal.y - TIP_R < b.y + .006 && tipLocal.y > b.y - .03;
+}
+// moving the keyboard: pinch and hold the back rail or the side cheeks, then drag
+let carry = null;
+function onCase(l){ const { total, L } = piano.userData;
+  return (l.z < -L / 2 - .005 && l.z > -L / 2 - .07 && Math.abs(l.x) < total / 2 + .03 && !checkSustain(l)) || (Math.abs(Math.abs(l.x) - total / 2 - .0125) < .025 && Math.abs(l.z) < L / 2 + .03); }
+function pinchPoint(s){
+  if (s.source?.hand){ const a = jointWorld(s, 'thumb-tip'), b = jointWorld(s, 'index-finger-tip'); return a && b ? a.lerp(b, .5) : null; }
+  return s.tip.getWorldPosition(new THREE.Vector3());
+}
+function updateCarry(now){
+  for (const s of slots){
+    if (!s.source) continue;
+    const p = pinchPoint(s); if (!p) continue;
+    if (carry?.slot === s){ if (!s.pinching) carry = null; else if (now - carry.t0 > 300){ piano.position.copy(p).add(carry.offset); piano.updateMatrixWorld(true); } }
+    else if (!carry && s.pinching && !s.wasPinching && onCase(piano.worldToLocal(p.clone()))) carry = { slot: s, t0: now, offset: piano.position.clone().sub(p) };
+    s.wasPinching = s.pinching;
+  }
+}
+
+/* ---------- floating instructions inside VR ---------- */
+const panel = (() => {
+  const c = document.createElement('canvas'); c.width = 1024; c.height = 300; const g = c.getContext('2d');
+  g.fillStyle = 'rgba(21,16,56,.88)'; g.beginPath(); g.roundRect(0, 0, 1024, 300, 36); g.fill();
+  g.fillStyle = '#ffcf5c'; g.font = '700 46px Unbounded, Inter, sans-serif'; g.textAlign = 'center'; g.fillText('Piano', 512, 72);
+  g.fillStyle = '#eeedff'; g.font = '500 33px Inter, sans-serif';
+  ['Play with all ten fingers; strike harder to play louder',
+   'Tap the Sustain button on the back rail to hold notes',
+   'Pinch and hold the back rail to move the keyboard'].forEach((t, i) => g.fillText(t, 512, 140 + i * 52));
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(.9, .264), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true }));
+  m.visible = false; scene.add(m); return m;
+})();
+let panelHideAt = 0;
+
+/* ---------- desktop preview: mouse and computer keyboard ---------- */
+function fitDesktop(){
+  if (renderer.xr.isPresenting) return;
+  piano.position.set(0, .85, -.45); piano.quaternion.identity(); piano.updateMatrixWorld(true);
+  const w = piano.userData.total + .1, dist = (w / 2) / Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) / Math.min(1, camera.aspect) * .62 + .2;
+  camera.position.set(0, .85 + dist * .62, -.45 + dist * .78); camera.lookAt(0, .85, -.48);
+}
+fitDesktop();
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+let mouseKey = null;
+function keyUnderMouse(e){
+  ndc.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(ndc, camera);
+  const hits = ray.intersectObjects(keys.map(k => k.mesh), false); if (!hits.length) return null;
+  return keys.find(k => k.mesh === hits[0].object);
+}
+const cvs = renderer.domElement;
+cvs.addEventListener('pointerdown', e => { if (renderer.xr.isPresenting) return; initAudio(); cvs.setPointerCapture(e.pointerId);
+  const k = keyUnderMouse(e); if (k){ mouseKey = k; press(k, .7); k.depth = PRESS; } });
+cvs.addEventListener('pointermove', e => { if (!mouseKey || renderer.xr.isPresenting) return; const k = keyUnderMouse(e);
+  if (k && k !== mouseKey){ mouseKey.depth = 0; release(mouseKey); mouseKey = k; press(k, .6); k.depth = PRESS; } });
+const endMouse = () => { if (mouseKey){ mouseKey.depth = 0; release(mouseKey); mouseKey = null; } };
+cvs.addEventListener('pointerup', endMouse); cvs.addEventListener('pointercancel', endMouse);
+const KEYMAP = { z: 48, s: 49, x: 50, d: 51, c: 52, v: 53, g: 54, b: 55, h: 56, n: 57, j: 58, m: 59,
+  q: 60, 2: 61, w: 62, 3: 63, e: 64, r: 65, 5: 66, t: 67, 6: 68, y: 69, 7: 70, u: 71, i: 72 };
+const down = new Set();
+addEventListener('keydown', e => {
+  if (e.metaKey || e.ctrlKey) return;
+  if (e.code === 'Space'){ e.preventDefault(); if (!e.repeat){ initAudio(); setSustain(true); } return; }
+  const m = KEYMAP[e.key.toLowerCase()]; if (m === undefined || e.repeat || down.has(m)) return;
+  initAudio(); down.add(m); const k = keys.find(k => k.m === m); press(k, .7); k.depth = PRESS;
+});
+addEventListener('keyup', e => {
+  if (e.code === 'Space'){ setSustain(false); return; }
+  const m = KEYMAP[e.key.toLowerCase()]; if (m === undefined || !down.has(m)) return;
+  down.delete(m); const k = keys.find(k => k.m === m); k.depth = 0; release(k);
+});
+document.getElementById('bSustain').onclick = () => { initAudio(); setSustain(!sustain); };
+
+/* ---------- loop ---------- */
+const tmp = new THREE.Vector3();
+renderer.setAnimationLoop(() => {
+  const now = performance.now();
+  if (renderer.xr.isPresenting){
+    updateCarry(now);
+    let onSustain = false;
+    for (const s of slots){
+      if (!s.source) continue;
+      if (s.source.hand) decorateHand(s);
+      if (carry?.slot === s){ s.fingers.forEach(releaseFinger); continue; }
+      const pts = s.source.hand ? TIPS.map(n => jointWorld(s, n)) : [s.tip.getWorldPosition(new THREE.Vector3()), null, null, null, null];
+      pts.forEach((w, i) => {
+        if (!w){ releaseFinger(s.fingers[i]); return; }
+        const l = piano.worldToLocal(w);
+        if (checkSustain(l)) onSustain = true;
+        activeSlot = s; fingerStep(s.fingers[i], l, now); activeSlot = null;
+      });
+    }
+    if (onSustain && !sustainLatch){ setSustain(!sustain); } sustainLatch = onSustain;
+    if (panelHideAt && now > panelHideAt){ panel.visible = false; panelHideAt = 0; }
+  }
+  for (const k of keys){ // keys follow the finger down; glow fades after the strike
+    k.obj.position.y += ((k.restY - k.depth) - k.obj.position.y) * .6;
+    k.glow = Math.max(k.fingers ? .55 : 0, k.glow - .04);
+    k.glowMesh.material.opacity = k.glow * .55;
+    k.mesh.material.color.copy(k.base).lerp(k.hue, Math.min(1, k.glow * 1.2));
+  }
+  sustainBtn.position.y += (((sustain ? .034 : .038)) - sustainBtn.position.y) * .4;
+  updateListener();
+  renderer.render(scene, camera);
+});
+
+/* ---------- UI ---------- */
+const msg = document.getElementById('msg');
+function say(t, ms){ msg.textContent = t; msg.hidden = !t; clearTimeout(say.t); if (ms) say.t = setTimeout(() => msg.hidden = true, ms); }
+document.getElementById('url').textContent = location.href.split('#')[0];
+const intro = document.getElementById('intro');
+const start = () => {
+  initAudio(); intro.hidden = true;
+  const big = document.getElementById('optBig').checked; if ((big ? 1.3 : 1) !== keyScale){ buildKeyboard(big ? 1.3 : 1); fitDesktop(); }
+};
+document.getElementById('goDesk').onclick = start;
+async function enterVR(){
+  start();
+  try {
+    const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor', 'hand-tracking'] });
+    await renderer.xr.setSession(session);
+    document.getElementById('hint').hidden = true;
+    setTimeout(() => { // once there's a head pose: keyboard at table height in front of you, instructions above it
+      const cam = renderer.xr.getCamera(), head = cam.getWorldPosition(new THREE.Vector3()); if (head.y < .5) head.y = 1.6;
+      const f = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.getWorldQuaternion(new THREE.Quaternion())).setY(0).normalize();
+      piano.position.copy(head).addScaledVector(f, .42); piano.position.y = head.y - .5;
+      piano.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), f); piano.updateMatrixWorld(true);
+      panel.position.copy(head).addScaledVector(f, 1.1); panel.position.y = head.y + .2; panel.lookAt(head);
+      panel.visible = true; panelHideAt = performance.now() + 12000;
+    }, 300);
+    session.addEventListener('end', () => { panel.visible = false; carry = null; slots.forEach(s => s.fingers.forEach(releaseFinger)); document.getElementById('hint').hidden = false; fitDesktop(); });
+  } catch (err){ say('Could not start VR: ' + (err.message || err), 5000); }
+}
+(async () => {
+  const ok = navigator.xr && await navigator.xr.isSessionSupported('immersive-vr').catch(() => false);
+  for (const id of ['goVR', 'bVR']){ const b = document.getElementById(id); b.hidden = !ok; b.onclick = enterVR; }
+  document.getElementById('noVR').hidden = !!ok;
+})();
+</script>
+</html>

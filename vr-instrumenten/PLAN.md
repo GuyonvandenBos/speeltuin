@@ -51,6 +51,7 @@ Lightstrings (in deze repo) liet zien waar een laptopcamera tekortschiet: geen d
 2. **Gitaar, vrij spelen:** gitaar in je handen, akkoorden kiezen op de hals, aanslaan met de andere hand.
    *Status: gebouwd, staat in [`gitaar/`](gitaar/). Akkoorden kies je met akkoordvakken op de hals (echte vingerposities zijn te fijn voor handtracking). Nog testen op een echte Quest.*
 3. **Piano, vrij spelen:** keyboard op tafelhoogte, losse vingers, aanslagsterkte.
+   *Status: gebouwd, staat in [`piano/`](piano/). Drie octaven met echte pianosamples (Salamander Grand Piano). Nog testen op een echte Quest.*
 4. **Oefenmodus:** eerst voor gitaarakkoorden en pianotoonladders.
 5. **Drums en ritme-modus.**
 6. **Opnemen, liedjes, meer instrumenten.**
@@ -61,5 +62,5 @@ Elke stap levert iets speelbaars op dat je met de Quest kunt testen voordat de v
 
 - Welke Quest heeft je vriend? Handtracking werkt het best op de Quest 3.
 - Handen of controllers als hoofdbesturing? Handen voelen echter, controllers zijn preciezer (vooral voor drums).
-- Instrumentgeluiden: zelf genereren, of gratis samples gebruiken (licentie checken)?
+- Instrumentgeluiden: zelf genereren, of gratis samples gebruiken (licentie checken)? De piano gebruikt de Salamander Grand Piano (CC-BY 3.0, naamsvermelding staat erbij).
 - Blijft het een browsergame, of later een echte Quest-app?
